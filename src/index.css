@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+/* ── Brand Theme Tokens ─────────────────────────────────────────────────── */
+@theme {
+  /* Gold / sacred palette */
+  --color-gold-50:   #fdf9ed;
+  --color-gold-100:  #f8edca;
+  --color-gold-200:  #f0d68a;
+  --color-gold-300:  #e6bc50;
+  --color-gold-400:  #c9a84c;
+  --color-gold-500:  #a88830;
+  --color-gold-600:  #876919;
+  --color-gold-700:  #664e10;
+  --color-gold-800:  #4a380d;
+  --color-gold-900:  #2e220a;
+
+  /* Night / depth */
+  --color-night-50:  #f0f1f3;
+  --color-night-100: #d6d8dd;
+  --color-night-200: #9fa4af;
+  --color-night-300: #6b7180;
+  --color-night-400: #454b58;
+  --color-night-500: #252b36;
+  --color-night-600: #181e28;
+  --color-night-700: #111520;
+  --color-night-800: #0d1117;
+  --color-night-900: #080b0f;
+
+  /* Section accent colours */
+  --color-sacred-blue:   #a8c4e0;
+  --color-sacred-green:  #8ab4a0;
+  --color-sacred-violet: #9b8ec4;
+  --color-sacred-copper: #b87333;
+  --color-parchment:     #e8e0d0;
+
+  /* Fonts */
+  --font-display:   "Cinzel Decorative", "Cinzel", Georgia, serif;
+  --font-heading:   "Cinzel", Georgia, serif;
+  --font-body:      "Crimson Text", Georgia, serif;
+  --font-sans:      "DM Sans", system-ui, sans-serif;
+
+  /* Animations */
+  --animate-fade-up:  fadeUp 0.5s ease both;
+  --animate-fade-in:  fadeIn 0.4s ease both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: #0d1117;
+  color: #e8e0d0;
+  font-family: "Crimson Text", Georgia, serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

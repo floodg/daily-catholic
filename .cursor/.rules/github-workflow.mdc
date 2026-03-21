@@ -1,0 +1,11 @@
+---
+alwaysApply: false
+---
+When implementing GitHub issues:
+
+1. Generate a short plan first.
+2. Create branch feat/{issue-number}-{slug}.
+3. Implement the issue.
+4. Commit logically.
+5. Push branch.
+6. Open draft PR referencing the issue.

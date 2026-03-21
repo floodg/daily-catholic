@@ -1,0 +1,11 @@
+# Copy this file to local.properties and fill in your Supabase project details.
+# local.properties is NOT committed to version control.
+
+# For local development (Supabase CLI running locally):
+# Use 10.0.2.2 on Android Emulator (maps to host machine's localhost)
+supabase.url=http://10.0.2.2:54321
+supabase.anonKey=<your-anon-key-from-supabase-status>
+
+# For production / Supabase cloud:
+# supabase.url=https://<your-project-ref>.supabase.co
+# supabase.anonKey=<your-production-anon-key>

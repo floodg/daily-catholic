@@ -1,0 +1,12 @@
+# .github/copilot.yml
+rules:
+  - text: |
+      For all database changes in this project:
+      - Never edit the database manually in Supabase Studio as the source of truth.
+      - Never rely on ad hoc SQL run directly against local DB without saving it as a migration.
+      - Always create a new migration file for every schema change.
+      - Keep schema changes idempotent where practical.
+      - Enable RLS on all user-owned tables.
+      - Add explicit policies for each table.
+      - After schema changes, regenerate TypeScript types.
+      - Prefer clear table names, foreign keys, indexes, and created_at timestamps.
