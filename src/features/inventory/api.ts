@@ -214,7 +214,8 @@ export async function getIngredientStockLevels(): Promise<Record<string, Record<
   const { data: scopedData, error: scopedErr } = await supabase
     .from('inventory_stock_levels')
     .select('ingredient_name, unit, current_quantity')
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .gt('current_quantity', 0);
 
   if (scopedErr) throw scopedErr;
 
