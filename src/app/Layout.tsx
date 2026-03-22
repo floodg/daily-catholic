@@ -30,6 +30,7 @@ const NAV: NavSection[] = [
       { to: '/app/meals',          icon: '🥩', label: 'Meals'         },
       { to: '/app/shopping',       icon: '🛒', label: 'Shopping List' },
       { to: '/app/shopping-trips', icon: '🧾', label: 'Trip History'  },
+      { to: '/app/pantry',         icon: '🥫', label: 'Pantry'        },
       { to: '/app/workouts',       icon: '⚔️', label: 'Workouts'      },
       { to: '/app/macros',         icon: '📊', label: 'My Macros'     },
     ],

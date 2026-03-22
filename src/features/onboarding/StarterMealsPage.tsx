@@ -88,7 +88,7 @@ export default function StarterMealsPage() {
   return (
     <div className="onboarding-page">
       <div className="page-header-bar">
-        <h1 className="page-title">👋 Welcome to Joe's Keto!</h1>
+        <h1 className="page-title">👋 Welcome to Daily Catholic!</h1>
         <p className="onboarding-subtitle">
           Choose some starter meals to add to your meal library.
           You can edit or delete them any time.
@@ -153,7 +153,7 @@ export default function StarterMealsPage() {
               checked={generateMealPlan}
               onChange={e => setGenerateMealPlan(e.target.checked)}
             />
-            Generate my starter Joe's Keto meal plan
+            Generate my starter meal plan
           </label>
           <span className="field-hint">Pre-populate your Weekly Meal Plan with a default month of keto meals</span>
         </div>

@@ -4,8 +4,6 @@ A React app for **integrated Catholic life**: **Fiat** (Divine Will spirituality
 
 All meal planning, inventory, shopping, and profile data are stored in **Supabase** (PostgreSQL) with **Row Level Security**.
 
-> **Repository note:** The npm package name is still `joes-keto`; the product surface is **Daily Catholic**.
-
 ## Features
 
 ### Fiat & planning
@@ -52,8 +50,8 @@ All meal planning, inventory, shopping, and profile data are stored in **Supabas
 ### Installation
 
 ```bash
-git clone https://github.com/laidbacknet/joes-keto.git
-cd joes-keto
+git clone https://github.com/laidbacknet/daily-catholic.git
+cd daily-catholic
 
 npm install
 
