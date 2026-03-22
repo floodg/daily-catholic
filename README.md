@@ -50,7 +50,7 @@ All meal planning, inventory, shopping, and profile data are stored in **Supabas
 ### Installation
 
 ```bash
-git clone https://github.com/laidbacknet/daily-catholic.git
+git clone https://github.com/floodg/daily-catholic.git
 cd daily-catholic
 
 npm install
