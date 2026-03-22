@@ -30,7 +30,7 @@ function ProtectedRoute() {
 
   // Only block on initial load — don't unmount children during token/profile refreshes
   if (loading || (profileLoading && profile === null)) return <div className="auth-loading">Loading…</div>
-  if (!session) return <Navigate to="/login" replace />
+  if (!session) return <Navigate to="/login" replace state={{ from: location }} />
 
   if (
     profile !== null &&
@@ -45,10 +45,24 @@ function ProtectedRoute() {
 
 function AdminRoute() {
   const { session, loading, profile, profileLoading } = useAuth()
+  const location = useLocation()
 
   if (loading || (profileLoading && profile === null)) return <div className="auth-loading">Loading…</div>
-  if (!session) return <Navigate to="/login" replace />
+  if (!session) return <Navigate to="/login" replace state={{ from: location }} />
   if (profile?.role !== 'admin') return <Navigate to="/app/dashboard" replace />
+
+  return <Outlet />
+}
+
+/** Fiat Mode is app-only: requires session (defense in depth with ProtectedRoute). */
+function FiatSessionGuard() {
+  const { session, loading } = useAuth()
+  const location = useLocation()
+
+  if (loading) return <div className="auth-loading">Loading…</div>
+  if (!session) {
+    return <Navigate to="/login" replace state={{ from: location }} />
+  }
 
   return <Outlet />
 }
@@ -66,7 +80,9 @@ function App() {
             <Route path="onboarding" element={<StarterMealsPage />} />
             <Route element={<Layout />}>
               <Route index element={<Navigate to="/app/fiat" replace />} />
-              <Route path="fiat" element={<FiatModePage />} />
+              <Route element={<FiatSessionGuard />}>
+                <Route path="fiat" element={<FiatModePage />} />
+              </Route>
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="meals" element={<MealsPage />} />
               <Route path="plan" element={<PlanPage />} />

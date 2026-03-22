@@ -1,147 +1,34 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { supabase } from '../../lib/supabase'
+import {
+  type DailyEntry,
+  type CheckKey,
+  getSectionsForDate,
+  computeScore,
+  emptyEntry,
+  maxScoreForSections,
+  toYoutubeEmbedUrl,
+} from './fiatScoring'
+import {
+  fetchFiatRange,
+  upsertFiatDay,
+  toISODate,
+  todayIso,
+  startOfWeekMonday,
+  addDays,
+  entryFromRow,
+  fiatDayRowFromEntry,
+  type FiatDayRow,
+} from '../../lib/fiatDaily'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface DailyEntry {
-  date: string
-  gospel_read: boolean
-  reflection: boolean
-  eucharist: boolean
-  sunday_mass: boolean
-  rosary: boolean
-  angelus_noon: boolean
-  angelus_evening: boolean
-  fiat_morning: boolean
-  fiat_day: boolean
-  fiat_night: boolean
-  protein_target: boolean
-  no_snacking: boolean
-  training: boolean
-  no_scrolling: boolean
-  followed_structure: boolean
-  examen: boolean
-}
-
-type CheckKey = keyof Omit<DailyEntry, 'date'>
-
-interface Section {
-  id: string
-  icon: string
-  title: string
-  subtitle: string
-  color: string
-  checks: { key: CheckKey; label: string; points: number; required?: boolean; sundayOnly?: boolean; weekdayOnly?: boolean }[]
-}
-
-// ── Config ────────────────────────────────────────────────────────────────────
-
-const ALL_SECTIONS: Section[] = [
-  {
-    id: 'word', icon: '✦', title: 'Word of God', subtitle: 'Lectio Divina',
-    color: '#c9a84c',
-    checks: [
-      { key: 'gospel_read', label: 'Daily Gospel read',         points: 8 },
-      { key: 'reflection',  label: 'Daily Reflection complete', points: 7 },
-    ],
-  },
-  {
-    id: 'eucharist', icon: '✝', title: 'Eucharist', subtitle: 'Source & Summit',
-    color: '#e8d5a3',
-    checks: [
-      { key: 'sunday_mass', label: 'Sunday Mass', points: 25, required: true, sundayOnly: true },
-      { key: 'eucharist',   label: 'Daily Mass (optional)',  points: 12, weekdayOnly: true },
-    ],
-  },
-  {
-    id: 'fiat', icon: '🕊', title: 'Divine Will', subtitle: 'Fiat voluntas tua',
-    color: '#a8c4e0',
-    checks: [
-      { key: 'fiat_morning', label: 'Morning Offering-The Prevenient Act', points: 9 },
-      { key: 'fiat_day',     label: 'Fusing in the Divine Will',           points: 8 },
-      { key: 'fiat_night',   label: 'Night Offering-The Consecration Act', points: 8 },
-      { key: 'rosary',          label: '__rosary__',       points: 10 },
-      { key: 'angelus_noon',    label: 'Angelus · Noon',   points: 5 },
-      { key: 'angelus_evening', label: 'Angelus · 6pm',    points: 5 },
-    ],
-  },
-  {
-    id: 'body', icon: '⚔', title: 'Body Discipline', subtitle: 'Temple of the Spirit',
-    color: '#8ab4a0',
-    checks: [
-      { key: 'protein_target', label: 'Protein target hit',    points: 7 },
-      { key: 'no_snacking',    label: 'No snacking',           points: 6 },
-      { key: 'training',       label: 'Walk / Lift completed', points: 7 },
-    ],
-  },
-  {
-    id: 'order', icon: '◈', title: 'Order', subtitle: 'Ordo vitae',
-    color: '#9b8ec4',
-    checks: [
-      { key: 'no_scrolling',       label: 'No mindless scrolling', points: 5 },
-      { key: 'followed_structure', label: 'Followed structure',     points: 5 },
-    ],
-  },
-  {
-    id: 'examen', icon: '☽', title: 'Examen', subtitle: "Review in God's presence",
-    color: '#b87333',
-    checks: [
-      { key: 'examen', label: 'Reviewed the day', points: 10 },
-    ],
-  },
-]
-
-const ROSARY_MYSTERIES: Record<number, string> = {
-  0: 'Glorious Mysteries',   // Sunday
-  1: 'Joyful Mysteries',     // Monday
-  2: 'Sorrowful Mysteries',  // Tuesday
-  3: 'Glorious Mysteries',   // Wednesday
-  4: 'Luminous Mysteries',   // Thursday
-  5: 'Sorrowful Mysteries',  // Friday
-  6: 'Joyful Mysteries',     // Saturday
-}
-
-function getSections(isSunday: boolean, dayOfWeek: number): Section[] {
-  const mystery = ROSARY_MYSTERIES[dayOfWeek]
-  return ALL_SECTIONS.map(sec => ({
-    ...sec,
-    checks: sec.checks
-      .filter(c => {
-        if (c.sundayOnly  && !isSunday) return false
-        if (c.weekdayOnly &&  isSunday) return false
-        return true
-      })
-      .map(c => c.label === '__rosary__' ? { ...c, label: `Rosary · ${mystery}` } : c),
-  }))
-}
-
-const WEEK_SCORES = [85, 92, 78, 100, 88, 70, 95]
-const WEEK_DAYS   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const WEEK_DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function today() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 function formatDate(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   })
-}
-
-function emptyEntry(date: string): DailyEntry {
-  return {
-    date,
-    gospel_read: false, reflection: false,
-    eucharist: false, sunday_mass: false,
-    rosary: false,
-    angelus_noon: false, angelus_evening: false,
-    fiat_morning: false, fiat_day: false, fiat_night: false,
-    protein_target: false, no_snacking: false, training: false,
-    no_scrolling: false, followed_structure: false,
-    examen: false,
-  }
 }
 
 function getPrompt() {
@@ -152,12 +39,6 @@ function getPrompt() {
   if (h < 17) return '"Continue what remains. Nothing wasted."'
   if (h < 20) return '"Complete the day in His will."'
   return '"Review. Give thanks. Night Fiat."'
-}
-
-function computeScore(entry: DailyEntry, sections: Section[]) {
-  return sections.flatMap(s => s.checks)
-    .filter(c => entry[c.key])
-    .reduce((sum, c) => sum + c.points, 0)
 }
 
 // ── Score Ring ────────────────────────────────────────────────────────────────
@@ -194,25 +75,114 @@ function ScoreRing({ score, max }: { score: number; max: number }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function FiatModePage() {
-  const [entry, setEntry]             = useState<DailyEntry>(emptyEntry(today()))
-  const [fiatOn, setFiatOn]           = useState(true)
-  const [activeWeekDay, setActiveWeekDay] = useState(3)
-  const [animatedIn, setAnimatedIn]   = useState(false)
+  const initialDate = todayIso()
+  const [viewDate, setViewDate] = useState(initialDate)
+  const [entry, setEntry] = useState<DailyEntry>(() => emptyEntry(initialDate))
+  const [fiatOn, setFiatOn] = useState(true)
+  const [animatedIn, setAnimatedIn] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [weekData, setWeekData] = useState<Map<string, FiatDayRow>>(() => new Map())
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [videoModal, setVideoModal] = useState<{ title: string; embedUrl: string } | null>(null)
+
+  const skipNextSave = useRef(true)
+  const weekDataRef = useRef(weekData)
+  weekDataRef.current = weekData
+
+  const SECTIONS = useMemo(() => getSectionsForDate(viewDate), [viewDate])
+  const MAX_SCORE = useMemo(() => maxScoreForSections(SECTIONS), [SECTIONS])
+  const score = computeScore(entry, SECTIONS)
+
+  const weekSlots = useMemo(() => {
+    const mon = startOfWeekMonday(new Date())
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = addDays(mon, i)
+      const iso = toISODate(d)
+      const row = weekData.get(iso)
+      const sections = getSectionsForDate(iso)
+      const max = row?.max_score ?? maxScoreForSections(sections)
+      const sc = row?.score ?? 0
+      return { iso, label: WEEK_DAY_LABELS[i], max, score: sc }
+    })
+  }, [weekData])
 
   useEffect(() => {
     const t = setTimeout(() => setAnimatedIn(true), 60)
     return () => clearTimeout(t)
   }, [])
 
-  const dayOfWeek = new Date().getDay()
-  const isSunday  = dayOfWeek === 0
-  const SECTIONS  = getSections(isSunday, dayOfWeek)
-  const MAX_SCORE = SECTIONS.flatMap(s => s.checks).reduce((sum, c) => sum + c.points, 0)
-  const score     = computeScore(entry, SECTIONS)
+  useEffect(() => {
+    if (!videoModal) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setVideoModal(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [videoModal])
 
-  function toggle(key: CheckKey) {
-    setEntry(prev => ({ ...prev, [key]: !prev[key] }))
-  }
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      setHistoryLoading(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      const uid = user?.id ?? null
+      if (cancelled) return
+      setUserId(uid)
+
+      const mon = startOfWeekMonday(new Date())
+      const sun = addDays(mon, 6)
+      const map = await fetchFiatRange(uid, toISODate(mon), toISODate(sun))
+      if (cancelled) return
+
+      setWeekData(map)
+      const today = todayIso()
+      const next = entryFromRow(map.get(today), today)
+      skipNextSave.current = true
+      setViewDate(today)
+      setEntry(next)
+      setHistoryLoading(false)
+    }
+    run()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (skipNextSave.current) {
+      skipNextSave.current = false
+      return
+    }
+    const tid = setTimeout(() => {
+      const sc = getSectionsForDate(entry.date)
+      void upsertFiatDay(
+        userId,
+        { ...entry, date: entry.date },
+        computeScore(entry, sc),
+        maxScoreForSections(sc)
+      )
+      setWeekData(prev => {
+        const next = new Map(prev)
+        next.set(entry.date, fiatDayRowFromEntry({ ...entry, date: entry.date }))
+        return next
+      })
+    }, 450)
+    return () => clearTimeout(tid)
+  }, [entry, userId])
+
+  const handlePickDay = useCallback(async (iso: string) => {
+    if (iso === viewDate) return
+    await upsertFiatDay(userId, entry, computeScore(entry, SECTIONS), MAX_SCORE)
+    const m = new Map(weekDataRef.current)
+    m.set(entry.date, fiatDayRowFromEntry(entry))
+    const dest = m.get(iso)
+    skipNextSave.current = true
+    setWeekData(m)
+    setViewDate(iso)
+    setEntry(entryFromRow(dest, iso))
+  }, [viewDate, entry, userId, SECTIONS, MAX_SCORE])
+
+  const toggle = useCallback((key: CheckKey) => {
+    setEntry(prev => ({ ...prev, date: viewDate, [key]: !prev[key] }))
+  }, [viewDate])
 
   return (
     <>
@@ -481,6 +451,88 @@ export default function FiatModePage() {
           white-space: nowrap;
         }
 
+        .fcheck-media-btn {
+          flex-shrink: 0;
+          font-family: 'Cinzel', serif;
+          font-size: 0.5rem;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          padding: 0.35rem 0.5rem;
+          border-radius: 6px;
+          border: 1px solid rgba(201,168,76,0.35);
+          background: rgba(201,168,76,0.08);
+          color: rgba(201,168,76,0.85);
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .fcheck-media-btn:hover {
+          background: rgba(201,168,76,0.15);
+          border-color: rgba(201,168,76,0.55);
+        }
+
+        .fvideo-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 1000;
+          background: rgba(5, 8, 14, 0.88);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 1rem;
+          animation: fiatFadeUp 0.25s ease both;
+        }
+        .fvideo-dialog {
+          width: 100%;
+          max-width: min(92vw, 720px);
+          max-height: 90vh;
+          overflow: auto;
+          border-radius: 10px;
+          border: 1px solid rgba(201,168,76,0.2);
+          background: #0d1117;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .fvideo-dialog-hdr {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+          padding: 0.65rem 0.85rem;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .fvideo-dialog-title {
+          font-family: 'Crimson Text', Georgia, serif;
+          font-size: 0.95rem;
+          color: rgba(232,224,208,0.9);
+          margin: 0;
+          line-height: 1.3;
+        }
+        .fvideo-close {
+          flex-shrink: 0;
+          width: 32px;
+          height: 32px;
+          border: none;
+          border-radius: 6px;
+          background: rgba(255,255,255,0.06);
+          color: rgba(232,224,208,0.7);
+          font-size: 1.25rem;
+          line-height: 1;
+          cursor: pointer;
+        }
+        .fvideo-close:hover { background: rgba(255,255,255,0.1); color: #e8e0d0; }
+        .fvideo-frame-wrap {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 16 / 9;
+          background: #000;
+        }
+        .fvideo-frame-wrap iframe {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          border: 0;
+        }
+
         /* Divider */
         .fdivider {
           display: flex;
@@ -563,6 +615,53 @@ export default function FiatModePage() {
           transition: color 0.2s;
         }
         .fweek-num.sel { color: #c9a84c; }
+
+        .fhist-wrap {
+          margin-top: 1.25rem;
+          overflow-x: auto;
+        }
+        .fhist-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: 'Cinzel', serif;
+          font-size: 0.55rem;
+          letter-spacing: 0.06em;
+        }
+        .fhist-table th {
+          text-align: left;
+          text-transform: uppercase;
+          color: rgba(232,224,208,0.25);
+          padding: 0.5rem 0.35rem;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .fhist-table td {
+          padding: 0.55rem 0.35rem;
+          color: rgba(232,224,208,0.45);
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .fhist-table tr {
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+        .fhist-table tr:hover td {
+          background: rgba(255,255,255,0.02);
+        }
+        .fhist-table tr.sel td {
+          color: rgba(232,224,208,0.85);
+          background: rgba(201,168,76,0.06);
+        }
+        .fhist-table .fhist-pct {
+          color: rgba(201,168,76,0.45);
+        }
+        .fhist-table tr.sel .fhist-pct { color: rgba(201,168,76,0.75); }
+        .fhist-empty {
+          text-align: center;
+          font-family: 'Crimson Text', Georgia, serif;
+          font-style: italic;
+          font-size: 0.85rem;
+          color: rgba(232,224,208,0.25);
+          padding: 0.75rem;
+        }
 
         /* Verse footer */
         .fverse {
@@ -657,6 +756,7 @@ export default function FiatModePage() {
 
               {sec.checks.map(check => {
                 const checked = entry[check.key]
+                const media = check.media
                 return (
                   <div
                     key={check.key}
@@ -675,6 +775,32 @@ export default function FiatModePage() {
                     </div>
                     <span className={`fcheck-label${checked ? ' on' : ''}`}>{check.label}</span>
                     {check.required && <span className="fcheck-required">Required</span>}
+                    {media && (
+                      <button
+                        type="button"
+                        className="fcheck-media-btn"
+                        onClick={e => {
+                          e.stopPropagation()
+                          if (media.kind === 'youtube') {
+                            const embed = toYoutubeEmbedUrl(media.url)
+                            if (embed) {
+                              setVideoModal({ title: check.label, embedUrl: embed })
+                            } else {
+                              window.open(media.url, '_blank', 'noopener,noreferrer')
+                            }
+                          } else {
+                            window.open(media.url, '_blank', 'noopener,noreferrer')
+                          }
+                        }}
+                        aria-label={
+                          media.kind === 'youtube'
+                            ? `Watch video: ${check.label}`
+                            : `Open reading in new tab: ${check.label}`
+                        }
+                      >
+                        {media.kind === 'youtube' ? 'Watch' : 'Read'}
+                      </button>
+                    )}
                     <span className={`fcheck-pts${checked ? ' on' : ''}`}>+{check.points}</span>
                   </div>
                 )
@@ -688,26 +814,66 @@ export default function FiatModePage() {
           <span className="fdivider-sym">✦ ✝ ✦</span>
         </div>
 
-        {/* Weekly grid */}
+        {/* Weekly grid + history */}
         <div className={`fweek freveal ${animatedIn ? 'in' : ''}`} style={{ animationDelay: '580ms' }}>
           <div className="fweek-title">This Week · Fidelity</div>
           <div className="fweek-grid">
-            {WEEK_DAYS.map((day, i) => {
-              const s = i === 3 ? score : WEEK_SCORES[i]
-              const active = i === activeWeekDay
-              const col = s >= 90 ? '#c9a84c' : s >= 75 ? '#a8c4e0' : s >= 60 ? '#8ab4a0' : '#9b8ec4'
-              const h = Math.round((s / 100) * 52)
+            {weekSlots.map(slot => {
+              const ratio = slot.max > 0 ? slot.score / slot.max : 0
+              const active = slot.iso === viewDate
+              const col = ratio >= 0.9 ? '#c9a84c' : ratio >= 0.75 ? '#a8c4e0' : ratio >= 0.6 ? '#8ab4a0' : '#9b8ec4'
+              const h = Math.max(3, Math.round(ratio * 52))
               return (
-                <div key={day} className="fweek-col" onClick={() => setActiveWeekDay(i)}>
-                  <div className="fweek-day">{day}</div>
+                <div key={slot.iso} className="fweek-col" onClick={() => void handlePickDay(slot.iso)}>
+                  <div className="fweek-day">{slot.label}</div>
                   <div className="fweek-bar-wrap">
                     <div className={`fweek-bar${active ? ' sel' : ''}`}
                       style={{ height: `${h}px`, background: active ? col : `${col}55` }} />
                   </div>
-                  <div className={`fweek-num${active ? ' sel' : ''}`}>{s}</div>
+                  <div className={`fweek-num${active ? ' sel' : ''}`}>{slot.score}</div>
                 </div>
               )
             })}
+          </div>
+
+          <div className="fhist-wrap">
+            {historyLoading ? (
+              <div className="fhist-empty">Loading this week…</div>
+            ) : (
+              <table className="fhist-table">
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    <th>Date</th>
+                    <th>Score</th>
+                    <th>Max</th>
+                    <th>%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weekSlots.map(slot => {
+                    const active = slot.iso === viewDate
+                    const pct = slot.max > 0 ? Math.round((slot.score / slot.max) * 100) : 0
+                    const shortDate = new Date(slot.iso + 'T12:00:00').toLocaleDateString('en-AU', {
+                      day: 'numeric', month: 'short',
+                    })
+                    return (
+                      <tr
+                        key={`row-${slot.iso}`}
+                        className={active ? 'sel' : ''}
+                        onClick={() => void handlePickDay(slot.iso)}
+                      >
+                        <td>{slot.label}</td>
+                        <td>{shortDate}</td>
+                        <td>{slot.score}</td>
+                        <td>{slot.max}</td>
+                        <td className="fhist-pct">{pct}%</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
@@ -717,6 +883,38 @@ export default function FiatModePage() {
           <span>Galatians 2:20</span>
         </div>
       </div>
+
+      {videoModal && (
+        <div
+          className="fvideo-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fvideo-dialog-title"
+          onClick={() => setVideoModal(null)}
+        >
+          <div className="fvideo-dialog" onClick={e => e.stopPropagation()}>
+            <div className="fvideo-dialog-hdr">
+              <h3 id="fvideo-dialog-title" className="fvideo-dialog-title">{videoModal.title}</h3>
+              <button
+                type="button"
+                className="fvideo-close"
+                onClick={() => setVideoModal(null)}
+                aria-label="Close video"
+              >
+                ×
+              </button>
+            </div>
+            <div className="fvideo-frame-wrap">
+              <iframe
+                title={videoModal.title}
+                src={videoModal.embedUrl}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

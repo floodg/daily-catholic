@@ -153,10 +153,14 @@ enabled = true
 # in emails.
 site_url = "http://localhost:5173"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
+# Include /login so signup & magic-link confirmation emails can land there (see emailRedirectTo in app).
 additional_redirect_urls = [
   "http://127.0.0.1:5173",
+  "http://127.0.0.1:5173/login",
   "http://localhost:5173",
-  "https://dallyingly-cisternal-loida.ngrok-free.dev"
+  "http://localhost:5173/login",
+  "https://dallyingly-cisternal-loida.ngrok-free.dev",
+  "https://dallyingly-cisternal-loida.ngrok-free.dev/login"
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600

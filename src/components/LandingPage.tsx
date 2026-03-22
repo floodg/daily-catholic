@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { useAuth } from '../context/AuthProvider'
 
 const PILLARS = [
   {
@@ -40,8 +41,16 @@ const VERSES = [
 ]
 
 export default function LandingPage() {
+  const { session, loading: authLoading } = useAuth()
   const [mounted, setMounted] = useState(false)
   const [verseIdx, setVerseIdx] = useState(0)
+
+  // Until auth finishes bootstrapping (getUser), assume logged out so CTAs go to /login, not /app/fiat.
+  const authed = !authLoading && !!session
+  const fiatHref = authed ? '/app/fiat' : '/login'
+  const fiatLinkState = authed ? undefined : { from: { pathname: '/app/fiat' } }
+  const dashboardHref = authed ? '/app/dashboard' : '/login'
+  const dashboardLinkState = authed ? undefined : { from: { pathname: '/app/dashboard' } }
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 60)
@@ -449,11 +458,11 @@ export default function LandingPage() {
             <div className="land-nav-links">
               <a href="#pillars" className="land-nav-link">Rule of Life</a>
               <a href="#score"   className="land-nav-link">Fidelity Score</a>
-              <Link to="/app/fiat" className="land-nav-link" style={{ color: 'rgba(201,168,76,0.7)' }}>
+              <Link to={fiatHref} state={fiatLinkState} className="land-nav-link" style={{ color: 'rgba(201,168,76,0.7)' }}>
                 Enter App
               </Link>
             </div>
-            <Link to="/app/fiat" className="cta-primary" style={{ padding: '0.5rem 1.25rem', fontSize: '0.6rem' }}>
+            <Link to={fiatHref} state={fiatLinkState} className="cta-primary" style={{ padding: '0.5rem 1.25rem', fontSize: '0.6rem' }}>
               Fiat →
             </Link>
           </nav>
@@ -472,10 +481,10 @@ export default function LandingPage() {
               soul that wants to live fully surrendered.
             </p>
             <div className="hero-cta-row">
-              <Link to="/app/fiat" className="cta-primary">
+              <Link to={fiatHref} state={fiatLinkState} className="cta-primary">
                 🕊 Begin Fiat Mode
               </Link>
-              <Link to="/app/dashboard" className="cta-secondary">
+              <Link to={dashboardHref} state={dashboardLinkState} className="cta-secondary">
                 View Dashboard
               </Link>
             </div>
@@ -562,7 +571,7 @@ export default function LandingPage() {
             ))}
 
             <div style={{ marginTop: '3rem' }}>
-              <Link to="/app/fiat" className="cta-primary" style={{ margin: '0 auto' }}>
+              <Link to={fiatHref} state={fiatLinkState} className="cta-primary" style={{ margin: '0 auto' }}>
                 🕊 Open Fiat Mode
               </Link>
             </div>

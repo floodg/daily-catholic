@@ -1,14 +1,31 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import './auth.css'
 
+type LoginLocationState = { from?: { pathname?: string } }
+
 export default function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const fromPath =
+    (location.state as LoginLocationState | null)?.from?.pathname ?? '/app/fiat'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // After email confirmation or magic link, Supabase redirects here with tokens; send user into the app.
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) return
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        const dest = fromPath.startsWith('/') ? fromPath : '/app/fiat'
+        navigate(dest, { replace: true })
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [navigate, fromPath])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -25,7 +42,7 @@ export default function Login() {
       setError(msg)
       setLoading(false)
     } else {
-      navigate('/app/fiat')
+      navigate(fromPath.startsWith('/') ? fromPath : '/app/fiat', { replace: true })
     }
   }
 

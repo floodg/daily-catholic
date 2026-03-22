@@ -28,12 +28,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = useCallback(async (userId: string) => {
     setProfileLoading(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('has_completed_onboarding, role, approved')
       .eq('id', userId)
-      .single()
-    setProfile(data ?? null)
+      .maybeSingle()
+
+    if (error) {
+      console.error('fetchProfile', error)
+      setProfile(null)
+      setProfileLoading(false)
+      return
+    }
+
+    if (data === null) {
+      // Auth user exists but no profile row (e.g. DB reset while a JWT was still in localStorage)
+      await supabase.auth.signOut()
+      setSession(null)
+      setProfile(null)
+      setProfileLoading(false)
+      return
+    }
+
+    setProfile(data)
     setProfileLoading(false)
   }, [])
 
@@ -44,29 +61,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [session, fetchProfile])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      }
-    })
+    let cancelled = false
+    let subscription: { unsubscribe: () => void } | null = null
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      // TOKEN_REFRESHED only updates the stored token internally — no React state needed
-      if (event === 'TOKEN_REFRESHED') return
+    const run = async () => {
+      // getSession() reads localStorage only — after `supabase db reset` a stale JWT can remain
+      // until we validate with the auth server via getUser().
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-      setSession(session)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
+      if (cancelled) return
+
+      if (userError || !user) {
+        await supabase.auth.signOut()
+        setSession(null)
         setProfile(null)
+      } else {
+        const { data: { session: s } } = await supabase.auth.getSession()
+        setSession(s)
+        await fetchProfile(user.id)
       }
-    })
 
-    return () => subscription.unsubscribe()
+      setLoading(false)
+
+      if (cancelled) return
+
+      // Always subscribe (even when logged out) so sign-in / sign-out on this tab still updates state.
+      const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+        if (event === 'TOKEN_REFRESHED') return
+        setSession(nextSession)
+        if (nextSession?.user) {
+          void fetchProfile(nextSession.user.id)
+        } else {
+          setProfile(null)
+        }
+      })
+      subscription = data.subscription
+    }
+
+    void run()
+
+    return () => {
+      cancelled = true
+      subscription?.unsubscribe()
+    }
   }, [fetchProfile])
 
   const signOut = useCallback(async () => {

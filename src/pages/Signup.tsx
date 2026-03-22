@@ -20,6 +20,7 @@ export default function Signup() {
       email,
       password,
       options: {
+        emailRedirectTo: `${window.location.origin}/login`,
         data: {
           display_name: name,
         },
