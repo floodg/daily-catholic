@@ -14,100 +14,63 @@ export interface FiatDayRow {
   max_score: number
 }
 
-const LS_PREFIX = 'fiat_daily_v1'
-
-function lsKey(userKey: string, isoDate: string) {
-  return `${LS_PREFIX}:${userKey}:${isoDate}`
-}
-
+/** Week range for the signed-in user only (no localStorage). */
 export async function fetchFiatRange(
-  userId: string | null,
+  userId: string,
   startIso: string,
   endIso: string
 ): Promise<Map<string, FiatDayRow>> {
   const map = new Map<string, FiatDayRow>()
+  const { data, error } = await supabase
+    .from('fiat_daily_entries')
+    .select('day, checks, score, max_score')
+    .eq('user_id', userId)
+    .gte('day', startIso)
+    .lte('day', endIso)
 
-  if (userId) {
-    const { data, error } = await supabase
-      .from('fiat_daily_entries')
-      .select('day, checks, score, max_score')
-      .eq('user_id', userId)
-      .gte('day', startIso)
-      .lte('day', endIso)
-
-    if (error) {
-      console.error('fetchFiatRange', error)
-      return map
-    }
-    for (const row of data ?? []) {
-      const d = row.day as string
-      map.set(d, {
-        day: d,
-        checks: row.checks,
-        score: row.score ?? 0,
-        max_score: row.max_score ?? 0,
-      })
-    }
+  if (error) {
+    console.error('fetchFiatRange', error)
     return map
   }
-
-  // Signed-out: localStorage by date
-  const start = new Date(startIso + 'T12:00:00')
-  const end = new Date(endIso + 'T12:00:00')
-  for (let x = new Date(start); x <= end; x.setDate(x.getDate() + 1)) {
-    const iso = toISODate(x)
-    const raw = localStorage.getItem(lsKey('anon', iso))
-    if (!raw) continue
-    try {
-      const parsed = JSON.parse(raw) as FiatDayRow
-      map.set(iso, { ...parsed, day: iso })
-    } catch {
-      /* ignore */
-    }
+  for (const row of data ?? []) {
+    const d = row.day as string
+    map.set(d, {
+      day: d,
+      checks: row.checks,
+      score: row.score ?? 0,
+      max_score: row.max_score ?? 0,
+    })
   }
   return map
 }
 
 export async function upsertFiatDay(
-  userId: string | null,
+  userId: string,
   entry: DailyEntry,
   score: number,
   maxScore: number
-): Promise<void> {
+): Promise<{ error: Error | null }> {
   const checks: Record<string, boolean> = {}
   for (const k of Object.keys(entry) as (keyof DailyEntry)[]) {
     if (k === 'date') continue
     checks[k as string] = entry[k] as boolean
   }
 
-  if (userId) {
-    const { error } = await supabase.from('fiat_daily_entries').upsert(
-      {
-        user_id: userId,
-        day: entry.date,
-        checks,
-        score,
-        max_score: maxScore,
-      },
-      { onConflict: 'user_id,day' }
-    )
-    if (error) console.error('upsertFiatDay', error)
-    return
+  const { error } = await supabase.from('fiat_daily_entries').upsert(
+    {
+      user_id: userId,
+      day: entry.date,
+      checks,
+      score,
+      max_score: maxScore,
+    },
+    { onConflict: 'user_id,day' }
+  )
+  if (error) {
+    console.error('upsertFiatDay', error)
+    return { error: new Error(error.message) }
   }
-
-  try {
-    localStorage.setItem(
-      lsKey('anon', entry.date),
-      JSON.stringify({
-        day: entry.date,
-        checks,
-        score,
-        max_score: maxScore,
-      } satisfies FiatDayRow)
-    )
-  } catch (e) {
-    console.error('upsertFiatDay localStorage', e)
-  }
+  return { error: null }
 }
 
 export function toISODate(d: Date): string {

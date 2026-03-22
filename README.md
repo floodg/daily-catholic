@@ -8,7 +8,7 @@ All meal planning, inventory, shopping, and profile data are stored in **Supabas
 
 ### Fiat & planning
 
-- **Fiat Mode** — Morning/evening Fiat offerings and daily rhythm (default route after sign-in). Daily checks and scores persist to **`fiat_daily_entries`** (signed-in) or `localStorage` (signed-out); the weekly bar and table read that history (month/year views can use the same table later).
+- **Fiat Mode** — Morning/evening Fiat offerings and daily rhythm (default route after sign-in). Daily checks and scores persist only to **`fiat_daily_entries`** (Supabase); the page loads that day + the current week from the DB and saves on each check/uncheck (no browser localStorage for Fiat).
 - **Dashboard** — Today’s overview.
 - **Weekly Plan** — Calendar for planned meals.
 

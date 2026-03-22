@@ -83,11 +83,14 @@ export default function FiatModePage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [weekData, setWeekData] = useState<Map<string, FiatDayRow>>(() => new Map())
   const [historyLoading, setHistoryLoading] = useState(true)
+  const [dataReady, setDataReady] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [videoModal, setVideoModal] = useState<{ title: string; embedUrl: string } | null>(null)
 
-  const skipNextSave = useRef(true)
   const weekDataRef = useRef(weekData)
   weekDataRef.current = weekData
+  const entryRef = useRef(entry)
+  entryRef.current = entry
 
   const SECTIONS = useMemo(() => getSectionsForDate(viewDate), [viewDate])
   const MAX_SCORE = useMemo(() => maxScoreForSections(SECTIONS), [SECTIONS])
@@ -120,13 +123,27 @@ export default function FiatModePage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [videoModal])
 
+  // Load week + today’s row from DB only (no localStorage). Waits for auth so we never write before userId exists.
   useEffect(() => {
     let cancelled = false
     async function run() {
       setHistoryLoading(true)
+      setDataReady(false)
+      setSaveError(null)
+
       const { data: { user } } = await supabase.auth.getUser()
-      const uid = user?.id ?? null
       if (cancelled) return
+
+      if (!user?.id) {
+        setUserId(null)
+        setWeekData(new Map())
+        setEntry(emptyEntry(todayIso()))
+        setHistoryLoading(false)
+        setDataReady(true)
+        return
+      }
+
+      const uid = user.id
       setUserId(uid)
 
       const mon = startOfWeekMonday(new Date())
@@ -136,53 +153,56 @@ export default function FiatModePage() {
 
       setWeekData(map)
       const today = todayIso()
-      const next = entryFromRow(map.get(today), today)
-      skipNextSave.current = true
       setViewDate(today)
-      setEntry(next)
+      setEntry(entryFromRow(map.get(today), today))
       setHistoryLoading(false)
+      setDataReady(true)
     }
     run()
     return () => { cancelled = true }
   }, [])
 
-  useEffect(() => {
-    if (skipNextSave.current) {
-      skipNextSave.current = false
+  const handlePickDay = useCallback(async (iso: string) => {
+    if (iso === viewDate || !userId || !dataReady) return
+    setSaveError(null)
+    const { error } = await upsertFiatDay(
+      userId,
+      entry,
+      computeScore(entry, SECTIONS),
+      MAX_SCORE
+    )
+    if (error) {
+      setSaveError(error.message)
       return
     }
-    const tid = setTimeout(() => {
-      const sc = getSectionsForDate(entry.date)
-      void upsertFiatDay(
-        userId,
-        { ...entry, date: entry.date },
-        computeScore(entry, sc),
-        maxScoreForSections(sc)
-      )
-      setWeekData(prev => {
-        const next = new Map(prev)
-        next.set(entry.date, fiatDayRowFromEntry({ ...entry, date: entry.date }))
-        return next
-      })
-    }, 450)
-    return () => clearTimeout(tid)
-  }, [entry, userId])
-
-  const handlePickDay = useCallback(async (iso: string) => {
-    if (iso === viewDate) return
-    await upsertFiatDay(userId, entry, computeScore(entry, SECTIONS), MAX_SCORE)
     const m = new Map(weekDataRef.current)
-    m.set(entry.date, fiatDayRowFromEntry(entry))
+    m.set(viewDate, fiatDayRowFromEntry(entry))
     const dest = m.get(iso)
-    skipNextSave.current = true
     setWeekData(m)
     setViewDate(iso)
     setEntry(entryFromRow(dest, iso))
-  }, [viewDate, entry, userId, SECTIONS, MAX_SCORE])
+  }, [viewDate, entry, userId, dataReady, SECTIONS, MAX_SCORE])
 
-  const toggle = useCallback((key: CheckKey) => {
-    setEntry(prev => ({ ...prev, date: viewDate, [key]: !prev[key] }))
-  }, [viewDate])
+  const toggle = useCallback(async (key: CheckKey) => {
+    if (!userId || !dataReady) return
+    setSaveError(null)
+    const prev = entryRef.current
+    const next: DailyEntry = { ...prev, date: viewDate, [key]: !prev[key] }
+    const sections = getSectionsForDate(viewDate)
+    const sc = computeScore(next, sections)
+    const mx = maxScoreForSections(sections)
+    const { error } = await upsertFiatDay(userId, next, sc, mx)
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+    setEntry(next)
+    setWeekData(prevMap => {
+      const map = new Map(prevMap)
+      map.set(viewDate, fiatDayRowFromEntry(next))
+      return map
+    })
+  }, [userId, dataReady, viewDate])
 
   return (
     <>
@@ -339,6 +359,24 @@ export default function FiatModePage() {
           font-size: 0.65rem;
           letter-spacing: 0.1em;
           color: #c9a84c;
+        }
+
+        .fiat-save-err {
+          font-family: 'Crimson Text', Georgia, serif;
+          font-size: 0.9rem;
+          color: #e8a598;
+          text-align: center;
+          margin: -0.5rem 0 1rem;
+          padding: 0 0.5rem;
+        }
+        .fiat-loading-hint {
+          font-family: 'Cinzel', serif;
+          font-size: 0.55rem;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(232,224,208,0.35);
+          text-align: center;
+          margin: -0.75rem 0 1.25rem;
         }
 
         /* Section card */
@@ -727,6 +765,12 @@ export default function FiatModePage() {
           <span className="fprogress-tag">Fidelity</span>
           <span className="fprogress-num">{score} / {MAX_SCORE}</span>
         </div>
+        {!dataReady && (
+          <div className="fiat-loading-hint">Loading today from server…</div>
+        )}
+        {saveError && (
+          <div className="fiat-save-err" role="alert">{saveError}</div>
+        )}
 
         {/* Sections */}
         {SECTIONS.map((sec, sIdx) => {
