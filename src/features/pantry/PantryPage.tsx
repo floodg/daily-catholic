@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { addStockByPacks, addStockDirect, getPantryItems, setAutoReorder, type PantryItem, type PurchaseBreakdown } from './api';
 import { getLinkedProductsForIngredients, type LinkedProduct } from '../product-linking/api';
 import type { MeasurementUnitCode } from '../../domain/types';
+import { getIngredientsCatalog, type IngredientCatalog } from '../ingredients/api';
+import Combobox from '../../components/ui/Combobox';
 
 function daysSince(dateStr?: string): string {
   if (!dateStr) return 'never';
@@ -33,12 +35,36 @@ interface AddStockModalProps {
 
 function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps) {
   const [name, setName] = useState(ingredientName ?? '');
+  const [ingredients, setIngredients] = useState<IngredientCatalog[]>([]);
+  const [ingredientsLoading, setIngredientsLoading] = useState(false);
   const [packs, setPacks] = useState<number>(1);
   const [directQty, setDirectQty] = useState<number>(0);
   const [directUnit, setDirectUnit] = useState<Unit>('g');
   const [link, setLink] = useState<LinkedProduct | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState<'linked' | 'default' | 'manual'>('manual');
+
+  // Load ingredient catalog for searchable dropdown
+  useEffect(() => {
+    let cancelled = false;
+    setIngredientsLoading(true);
+    getIngredientsCatalog()
+      .then(list => {
+        if (cancelled) return;
+        const sorted = [...list].sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+        );
+        setIngredients(sorted);
+        // If a prefilled ingredient name is provided, ensure casing matches catalog
+        if (ingredientName) {
+          const match = sorted.find(i => i.name.toLowerCase() === ingredientName.toLowerCase());
+          if (match) setName(match.name);
+        }
+      })
+      .finally(() => { if (!cancelled) setIngredientsLoading(false); });
+    return () => { cancelled = true; };
+  }, [ingredientName]);
 
   useEffect(() => {
     let active = true;
@@ -57,6 +83,27 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
     return () => { active = false; };
   }, [name]);
 
+  const selectedIngredient = useMemo(
+    () => ingredients.find(i => i.name.toLowerCase() === name.trim().toLowerCase()) ?? null,
+    [ingredients, name]
+  );
+
+  // Choose default mode when ingredient or link changes:
+  // Prefer default product if present; otherwise use linked; otherwise manual.
+  useEffect(() => {
+    if (!name.trim()) {
+      setMode('manual');
+      return;
+    }
+    if (selectedIngredient?.defaultStoreProductId) {
+      setMode(prev => (prev === 'linked' || prev === 'manual') ? 'default' : 'default');
+    } else if (link) {
+      setMode(prev => (prev === 'default' || prev === 'manual') ? 'linked' : 'linked');
+    } else {
+      setMode('manual');
+    }
+  }, [name, selectedIngredient?.defaultStoreProductId, link]);
+
   const packSizeLabel = useMemo(() => {
     if (!link) return null;
     if (link.packSizeG) return `${link.packSizeG} g`;
@@ -70,7 +117,8 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
     setError('');
     setLoading(true);
     try {
-      if (link && packs > 0) {
+      if (mode === 'linked') {
+        if (!(link && packs > 0)) { setError('Enter a valid pack count.'); setLoading(false); return; }
         await addStockByPacks(name.trim(), packs);
       } else {
         if (!(directQty > 0)) { setError('Enter a quantity greater than zero.'); setLoading(false); return; }
@@ -93,61 +141,104 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
         {error && <p className="form-error">{error}</p>}
         <div className="form-group">
           <label className="app-label">Ingredient</label>
-          <input
-            type="text"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="e.g. Mozzarella"
-            className="app-input"
-            autoFocus
+          <Combobox<IngredientCatalog>
+            items={ingredients}
+            selectedKey={name}
+            getKey={(i) => i.name}
+            getLabel={(i) => i.name}
+            onSelectKey={(key) => {
+              setName(key);
+              // Reset inputs when ingredient changes
+              setPacks(1);
+              setDirectQty(0);
+            }}
+            placeholder={ingredientsLoading ? 'Loading ingredients…' : 'Search ingredients…'}
+            wrapperClassName="ip-combobox"
+            listClassName="ip-combobox-list"
+            optionClassName="ip-combobox-item"
           />
         </div>
 
-        {link ? (
-          <>
-            <p className="help-text">
-              Linked product: <strong>{link.productName}</strong>{' '}
-              {packSizeLabel ? <span>({packSizeLabel} per pack)</span> : null}
-            </p>
+        {/* Product selection */}
+        {name.trim() && (
+          <div className="form-group">
+            <label className="app-label">Product</label>
+            <div style={{ display: 'grid', gap: '0.5rem' }}>
+              {selectedIngredient?.defaultStoreProductName && (
+                <label className="radio-row">
+                  <input
+                    type="radio"
+                    name="productMode"
+                    checked={mode === 'default'}
+                    onChange={() => setMode('default')}
+                  />
+                  <span>
+                    Default product: <strong>{selectedIngredient.defaultStoreProductName}</strong>
+                  </span>
+                </label>
+              )}
+              {link && (
+                <label className="radio-row">
+                  <input
+                    type="radio"
+                    name="productMode"
+                    checked={mode === 'linked'}
+                    onChange={() => setMode('linked')}
+                  />
+                  <span>
+                    Linked product: <strong>{link.productName}</strong>
+                    {packSizeLabel ? <span> ({packSizeLabel} per pack)</span> : null}
+                  </span>
+                </label>
+              )}
+              <label className="radio-row">
+                <input
+                  type="radio"
+                  name="productMode"
+                  checked={mode === 'manual'}
+                  onChange={() => setMode('manual')}
+                />
+                <span>Enter quantity manually</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* Quantity controls */}
+        {mode === 'linked' ? (
+          <div className="form-group">
+            <label className="app-label">How many packs did you buy?</label>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={packs}
+              onChange={e => setPacks(parseInt(e.target.value || '0', 10))}
+              className="app-input"
+            />
+          </div>
+        ) : (
+          <div className="form-row">
             <div className="form-group">
-              <label className="app-label">How many packs did you buy?</label>
+              <label className="app-label">Quantity</label>
               <input
                 type="number"
-                min={1}
-                step={1}
-                value={packs}
-                onChange={e => setPacks(parseInt(e.target.value || '0', 10))}
+                min={0.01}
+                step={0.01}
+                value={directQty}
+                onChange={e => setDirectQty(parseFloat(e.target.value))}
                 className="app-input"
               />
             </div>
-          </>
-        ) : (
-          <>
-            <p className="help-text">
-              No linked product found. Enter quantity directly.
-            </p>
-            <div className="form-row">
-              <div className="form-group">
-                <label className="app-label">Quantity</label>
-                <input
-                  type="number"
-                  min={0.01}
-                  step={0.01}
-                  value={directQty}
-                  onChange={e => setDirectQty(parseFloat(e.target.value))}
-                  className="app-input"
-                />
-              </div>
-              <div className="form-group">
-                <label className="app-label">Unit</label>
-                <select value={directUnit} onChange={e => setDirectUnit(e.target.value as Unit)} className="app-input">
-                  <option value="g">g</option>
-                  <option value="ml">ml</option>
-                  <option value="units">units</option>
-                </select>
-              </div>
+            <div className="form-group">
+              <label className="app-label">Unit</label>
+              <select value={directUnit} onChange={e => setDirectUnit(e.target.value as Unit)} className="app-input">
+                <option value="g">g</option>
+                <option value="ml">ml</option>
+                <option value="units">units</option>
+              </select>
             </div>
-          </>
+          </div>
         )}
 
         <div className="modal-actions">

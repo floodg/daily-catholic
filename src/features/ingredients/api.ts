@@ -36,11 +36,21 @@ export interface IngredientCatalog {
   defaultStoreProductName: string | null;
   defaultStoreProductStore: string | null;
   defaultStoreProductUrl: string | null;
+  /** Structured size for default product, if available */
+  defaultStoreProductSizeValue: number | null;
+  defaultStoreProductUnitCode: string | null;
   createdAt: string;
 }
 
 /** Supabase may return the FK relation as a single object or a one-element array */
-type StoreProductRef = { name: string; store: string; product_url: string | null };
+type StoreProductRef = {
+  name: string;
+  store: string;
+  product_url: string | null;
+  size_label?: string | null;
+  size_value?: number | null;
+  size_unit_code?: string | null;
+};
 
 interface DbRow {
   id: string;
@@ -69,6 +79,8 @@ function dbToCatalog(row: DbRow): IngredientCatalog {
     defaultStoreProductName: ref?.name ?? null,
     defaultStoreProductStore: ref?.store ?? null,
     defaultStoreProductUrl: ref?.product_url ?? null,
+    defaultStoreProductSizeValue: ref?.size_value ?? null,
+    defaultStoreProductUnitCode: ref?.size_unit_code ?? null,
     createdAt: row.created_at,
   };
 }
@@ -83,7 +95,7 @@ export async function getIngredientsCatalog(): Promise<IngredientCatalog[]> {
       pantry_staple,
       default_store_product_id,
       created_at,
-      store_products:default_store_product_id ( name, store, product_url )
+      store_products:default_store_product_id ( name, store, product_url, size_label, size_value, size_unit_code )
     `)
     .order('name', { ascending: true });
 
@@ -112,7 +124,7 @@ export async function createIngredient(payload: {
       pantry_staple,
       default_store_product_id,
       created_at,
-      store_products:default_store_product_id ( name, store, product_url )
+      store_products:default_store_product_id ( name, store, product_url, size_label, size_value, size_unit_code )
     `)
     .single();
 
@@ -143,7 +155,7 @@ export async function updateIngredient(payload: {
       pantry_staple,
       default_store_product_id,
       created_at,
-      store_products:default_store_product_id ( name, store, product_url )
+      store_products:default_store_product_id ( name, store, product_url, size_label, size_value, size_unit_code )
     `)
     .single();
 
