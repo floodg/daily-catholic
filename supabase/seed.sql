@@ -563,3 +563,265 @@ update public.starter_meal_ingredients
   where id = 'aaaaaaaa-0002-0001-0001-000000000001'; -- Salmon fillet
 
 -- Daily Targets (no ingredients – instructions carry the targets)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Additional seed store products (Coles) for missing starter meal ingredients
+-- Added from current Coles catalogue matches
+-- ─────────────────────────────────────────────────────────────────────────────
+insert into public.store_products (id, name, brand, size_label, size_value, size_unit_code, store, product_url)
+values
+  (
+    '11111111-0001-0001-0001-000000000016',
+    'Coles Free Range Eggs 12 Pack',
+    'Coles',
+    '700g',
+    700,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-free-range-eggs-12-pack-700g-9453478'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000017',
+    'Mckenzie''s Baking Powder',
+    'Mckenzie''s',
+    '125g',
+    125,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/mckenzie%27s-baking-powder-125g-5110298'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000018',
+    'Coles Garlic Powder',
+    'Coles',
+    '60g',
+    60,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-garlic-powder-60g-8985074'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000019',
+    'Coles Table Salt',
+    'Coles',
+    '500g',
+    500,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-table-salt-500g-5925112'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000020',
+    'Coles Salsa Mild',
+    'Coles',
+    '300g',
+    300,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-salsa-mild-300g-5859834'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000021',
+    'Coles Cucumbers Continental Loose',
+    'Coles',
+    '1 each',
+    1,
+    'units',
+    'Coles',
+    'https://www.coles.com.au/product/coles-cucumbers-continental-loose-1-each-4575605'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000022',
+    'Coles Cherry Tomatoes',
+    'Coles',
+    '250g',
+    250,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-cherry-tomatoes-250g-4834736'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000023',
+    'Coles Onions Red Local',
+    'Coles',
+    'approx. 200g',
+    200,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-onions-red-local-approx.-200g-4218459'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000024',
+    'Coles Lemon Dressing',
+    'Coles',
+    '250mL',
+    250,
+    'ml',
+    'Coles',
+    'https://www.coles.com.au/product/coles-lemon-dressing-250ml-4472726'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000025',
+    'Coles Beef Scotch Steak Fillet 2 Pack',
+    'Coles',
+    '480g',
+    480,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-beef-scotch-steak-fillet-2-pack-480g-4997220'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000026',
+    'Coles 4 Leaf Salad Mix',
+    'Coles',
+    '120g',
+    120,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-4-leaf-salad-mix-120g-6885716'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000027',
+    'Coles Extra Virgin Olive Oil',
+    'Coles',
+    '1L',
+    1,
+    'l',
+    'Coles',
+    'https://www.coles.com.au/product/coles-extra-virgin-olive-oil-1l-5607376'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000028',
+    'Coles Salted Butter',
+    'Coles',
+    '500g',
+    500,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-salted-butter-500g-210160'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000029',
+    'Coles Ground Black Pepper',
+    'Coles',
+    '50g',
+    50,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-ground-black-pepper-50g-2677830'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000030',
+    'Coles RSPCA Approved Chicken Breast Fillets Small Pack',
+    'Coles',
+    'approx. 600g',
+    600,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-rspca-approved-chicken-breast-fillets-small-pack-approx.-600g-2263168'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000031',
+    'Coles Lemon Juice',
+    'Coles',
+    '500mL',
+    500,
+    'ml',
+    'Coles',
+    'https://www.coles.com.au/product/coles-lemon-juice-500ml-9069356'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000032',
+    'Coles Minced Garlic',
+    'Coles',
+    '250g',
+    250,
+    'g',
+    'Coles',
+    'https://www.coles.com.au/product/coles-minced-garlic-250g-5493277'
+  )
+on conflict (id) do nothing;
+
+-- Backfill default products for missing ingredients
+update public.ingredients
+set default_store_product_id = case lower(trim(name))
+  when 'egg' then '11111111-0001-0001-0001-000000000016'
+  when 'baking powder' then '11111111-0001-0001-0001-000000000017'
+  when 'garlic powder' then '11111111-0001-0001-0001-000000000018'
+  when 'salt' then '11111111-0001-0001-0001-000000000019'
+  when 'salsa' then '11111111-0001-0001-0001-000000000020'
+  when 'cucumber' then '11111111-0001-0001-0001-000000000021'
+  when 'cherry tomatoes' then '11111111-0001-0001-0001-000000000022'
+  when 'red onion' then '11111111-0001-0001-0001-000000000023'
+  when 'olive oil dressing' then '11111111-0001-0001-0001-000000000024'
+  when 'beef steak' then '11111111-0001-0001-0001-000000000025'
+  when 'mixed greens' then '11111111-0001-0001-0001-000000000026'
+  when 'olive oil' then '11111111-0001-0001-0001-000000000027'
+  when 'butter' then '11111111-0001-0001-0001-000000000028'
+  when 'salt & pepper' then '11111111-0001-0001-0001-000000000029'
+  when 'chicken breast' then '11111111-0001-0001-0001-000000000030'
+  when 'lemon juice' then '11111111-0001-0001-0001-000000000031'
+  when 'garlic' then '11111111-0001-0001-0001-000000000032'
+  else default_store_product_id
+end
+where default_store_product_id is null
+  and lower(trim(name)) in (
+    'egg', 'baking powder', 'garlic powder', 'salt', 'salsa', 'cucumber',
+    'cherry tomatoes', 'red onion', 'olive oil dressing', 'beef steak',
+    'mixed greens', 'olive oil', 'butter', 'salt & pepper',
+    'chicken breast', 'lemon juice', 'garlic'
+  );
+
+-- Backfill starter meal ingredient product links
+update public.starter_meal_ingredients
+set store_product_id = case lower(trim(name))
+  when 'mozzarella cheese' then '11111111-0001-0001-0001-000000000001'
+  when 'cream cheese' then '11111111-0001-0001-0001-000000000003'
+  when 'almond meal' then '11111111-0001-0001-0001-000000000006'
+  when 'egg' then '11111111-0001-0001-0001-000000000016'
+  when 'baking powder' then '11111111-0001-0001-0001-000000000017'
+  when 'garlic powder' then '11111111-0001-0001-0001-000000000018'
+  when 'salt' then '11111111-0001-0001-0001-000000000019'
+  when 'tomato paste' then '11111111-0001-0001-0001-000000000010'
+  when 'extra mozzarella (top)' then '11111111-0001-0001-0001-000000000001'
+  when 'beef mince' then '11111111-0001-0001-0001-000000000008'
+  when 'lettuce' then '11111111-0001-0001-0001-000000000013'
+  when 'cheese' then '11111111-0001-0001-0001-000000000012'
+  when 'sour cream' then '11111111-0001-0001-0001-000000000014'
+  when 'avocado' then '11111111-0001-0001-0001-000000000011'
+  when 'salsa' then '11111111-0001-0001-0001-000000000020'
+  when 'salmon fillet' then '11111111-0001-0001-0001-000000000009'
+  when 'cucumber' then '11111111-0001-0001-0001-000000000021'
+  when 'cherry tomatoes' then '11111111-0001-0001-0001-000000000022'
+  when 'red onion' then '11111111-0001-0001-0001-000000000023'
+  when 'olive oil dressing' then '11111111-0001-0001-0001-000000000024'
+  when 'beef steak' then '11111111-0001-0001-0001-000000000025'
+  when 'mixed greens' then '11111111-0001-0001-0001-000000000026'
+  when 'olive oil' then '11111111-0001-0001-0001-000000000027'
+  when 'butter' then '11111111-0001-0001-0001-000000000028'
+  when 'salt & pepper' then '11111111-0001-0001-0001-000000000029'
+  when 'chicken breast' then '11111111-0001-0001-0001-000000000030'
+  when 'lemon juice' then '11111111-0001-0001-0001-000000000031'
+  when 'garlic' then '11111111-0001-0001-0001-000000000032'
+  else store_product_id
+end
+where store_product_id is null
+  and lower(trim(name)) in (
+    'mozzarella cheese', 'cream cheese', 'almond meal', 'egg', 'baking powder',
+    'garlic powder', 'salt', 'tomato paste', 'extra mozzarella (top)',
+    'beef mince', 'lettuce', 'cheese', 'sour cream', 'avocado', 'salsa',
+    'salmon fillet', 'cucumber', 'cherry tomatoes', 'red onion',
+    'olive oil dressing', 'beef steak', 'mixed greens', 'olive oil',
+    'butter', 'salt & pepper', 'chicken breast', 'lemon juice', 'garlic'
+  );
+
+-- Optional pantry alternatives for combined "Salt & pepper" ingredient
+insert into public.starter_meal_ingredient_product_options
+  (starter_meal_ingredient_id, store_product_id, sort_order)
+values
+  ('dddddddd-0001-0001-0001-000000000005', '11111111-0001-0001-0001-000000000019', 0),
+  ('dddddddd-0001-0001-0001-000000000005', '11111111-0001-0001-0001-000000000029', 1),
+  ('eeeeeeee-0001-0001-0001-000000000006', '11111111-0001-0001-0001-000000000019', 0),
+  ('eeeeeeee-0001-0001-0001-000000000006', '11111111-0001-0001-0001-000000000029', 1),
+  ('ffffffff-0001-0001-0001-000000000005', '11111111-0001-0001-0001-000000000019', 0),
+  ('ffffffff-0001-0001-0001-000000000005', '11111111-0001-0001-0001-000000000029', 1)
+on conflict (starter_meal_ingredient_id, store_product_id) do nothing;
