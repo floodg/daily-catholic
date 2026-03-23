@@ -1,4 +1,16 @@
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Measurement units (required before store_products — FK store_products_size_unit_code_fk)
+-- ─────────────────────────────────────────────────────────────────────────────
+insert into public.measurement_units (code, label, dimension, base_code, base_multiplier)
+values
+  ('g',     'Gram',              'mass',  'g',  1),
+  ('kg',    'Kilogram',          'mass',  'g',  1000),
+  ('ml',    'Millilitre',        'volume', 'ml', 1),
+  ('l',     'Litre',             'volume', 'ml', 1000),
+  ('units', 'Unit (each)',       'count',  null, null)
+on conflict (code) do nothing;
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Seed store products (Coles)
 -- ─────────────────────────────────────────────────────────────────────────────
 insert into public.store_products (id, name, brand, size_label, size_value, size_unit_code, store, product_url)
