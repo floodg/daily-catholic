@@ -142,6 +142,16 @@ values
     'g',
     'Coles',
     'https://www.coles.com.au/product/coles-sour-cream-500g-3676980'
+  ),
+  (
+    '11111111-0001-0001-0001-000000000015',
+    'Tomatoes',
+    'Coles',
+    '1',
+    1,
+    'units',
+    'Coles',
+    'https://www.coles.com.au/product/coles-tomatoes-gourmet-approx.-130g-4597109'
   )
 on conflict (id) do nothing;
 
