@@ -365,7 +365,7 @@ function IngredientView({ item, onEdit, onDelete }: IngredientViewProps) {
       </div>
 
       <div style={{ display: "grid", gap: "0.75rem" }}>
-        <div style={{ border: "1px solid var(--app-border)", borderRadius: 14, padding: "0.875rem 1rem", background: "rgba(253, 248, 242, 0.6)" }}>
+        <div style={{ border: "1px solid var(--app-border)", borderRadius: 14, padding: "0.875rem 1rem", background: "var(--app-surface)" }}>
           <div style={{ fontFamily: "DM Sans, monospace", fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-subtle)", marginBottom: "0.25rem" }}>
             Default store product
           </div>

@@ -192,7 +192,7 @@ function IngredientRow({ ingredient, storeProducts, onIngredientUpdated }: Ingre
               border: '1px solid var(--app-border)',
               borderRadius: 14,
               padding: '0.75rem 0.875rem',
-              background: 'rgba(253, 248, 242, 0.6)',
+              background: 'var(--app-surface)',
               flex: 1,
               minWidth: 220,
             }}>
@@ -255,7 +255,7 @@ function IngredientRow({ ingredient, storeProducts, onIngredientUpdated }: Ingre
                 border: '1px solid var(--app-border)',
                 borderRadius: 14,
                 padding: '0.65rem 0.75rem',
-                background: 'rgba(253, 248, 242, 0.35)',
+                background: 'var(--app-surface)',
               }}
             >
               <div style={{ minWidth: 0 }}>
