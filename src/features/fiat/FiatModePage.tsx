@@ -5,6 +5,7 @@ import {
   type CheckKey,
   getSectionsForDate,
   computeScore,
+  computeBonusScore,
   emptyEntry,
   maxScoreForSections,
   toYoutubeEmbedUrl,
@@ -43,32 +44,68 @@ function getPrompt() {
 
 // ── Score Ring ────────────────────────────────────────────────────────────────
 
-function ScoreRing({ score, max }: { score: number; max: number }) {
-  const pct   = score / max
+function ScoreRing({ score, max, bonus = 0 }: { score: number; max: number; bonus?: number }) {
+  const pct   = Math.min(score / max, 1)
   const r     = 54
   const circ  = 2 * Math.PI * r
   const dash  = pct * circ
-  const color = pct >= 0.9 ? '#c9a84c' : pct >= 0.7 ? '#a8c4e0' : pct >= 0.5 ? '#8ab4a0' : '#9b8ec4'
+  const hasBonus = bonus > 0
+  const color = hasBonus || pct >= 0.9 ? '#c9a84c' : pct >= 0.7 ? '#a8c4e0' : pct >= 0.5 ? '#8ab4a0' : '#9b8ec4'
 
   return (
-    <svg width={128} height={128} viewBox="0 0 128 128" style={{ display: 'block' }}>
-      <circle cx={64} cy={64} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={8} />
-      <circle cx={64} cy={64} r={r} fill="none"
-        stroke={color} strokeWidth={8}
-        strokeDasharray={`${dash} ${circ}`}
-        strokeLinecap="round"
-        transform="rotate(-90 64 64)"
-        style={{ transition: 'stroke-dasharray 0.6s ease' }}
-      />
-      <text x={64} y={59} textAnchor="middle"
-        fontFamily="'Cinzel', serif" fontSize={28} fontWeight="700" fill="white" letterSpacing="1">
-        {score}
-      </text>
-      <text x={64} y={77} textAnchor="middle"
-        fontFamily="'Crimson Text', serif" fontSize={12} fill="rgba(255,255,255,0.35)" letterSpacing="2">
-        OF {max}
-      </text>
-    </svg>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+      <svg width={128} height={128} viewBox="0 0 128 128" style={{ display: 'block' }}>
+        {hasBonus && (
+          <circle cx={64} cy={64} r={r + 6} fill="none"
+            stroke="rgba(201,168,76,0.12)" strokeWidth={4}
+            style={{ filter: 'blur(2px)' }}
+          />
+        )}
+        <circle cx={64} cy={64} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={8} />
+        <circle cx={64} cy={64} r={r} fill="none"
+          stroke={color} strokeWidth={8}
+          strokeDasharray={`${dash} ${circ}`}
+          strokeLinecap="round"
+          transform="rotate(-90 64 64)"
+          style={{ transition: 'stroke-dasharray 0.6s ease', filter: hasBonus ? `drop-shadow(0 0 6px ${color}88)` : undefined }}
+        />
+        <text x={64} y={59} textAnchor="middle"
+          fontFamily="'Cinzel', serif" fontSize={28} fontWeight="700" fill="white" letterSpacing="1">
+          {score}
+        </text>
+        <text x={64} y={77} textAnchor="middle"
+          fontFamily="'Crimson Text', serif" fontSize={12} fill="rgba(255,255,255,0.35)" letterSpacing="2">
+          OF {max}
+        </text>
+      </svg>
+      {hasBonus && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.2rem' }}>
+          <span style={{
+            fontFamily: "'Cinzel', serif",
+            fontSize: '0.6rem',
+            fontWeight: 600,
+            letterSpacing: '0.2em',
+            textTransform: 'uppercase',
+            color: '#c9a84c',
+            border: '1px solid rgba(201,168,76,0.4)',
+            background: 'rgba(201,168,76,0.08)',
+            borderRadius: '4px',
+            padding: '0.2em 0.7em',
+          }}>
+            +{bonus} Bonus
+          </span>
+          <span style={{
+            fontFamily: "'Crimson Text', Georgia, serif",
+            fontStyle: 'italic',
+            fontSize: '0.75rem',
+            color: 'rgba(201,168,76,0.55)',
+            letterSpacing: '0.04em',
+          }}>
+            Mass attended ✦
+          </span>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -95,6 +132,7 @@ export default function FiatModePage() {
   const SECTIONS = useMemo(() => getSectionsForDate(viewDate), [viewDate])
   const MAX_SCORE = useMemo(() => maxScoreForSections(SECTIONS), [SECTIONS])
   const score = computeScore(entry, SECTIONS)
+  const bonusScore = computeBonusScore(entry, SECTIONS)
 
   const weekSlots = useMemo(() => {
     const mon = startOfWeekMonday(new Date())
@@ -105,7 +143,8 @@ export default function FiatModePage() {
       const sections = getSectionsForDate(iso)
       const max = row?.max_score ?? maxScoreForSections(sections)
       const sc = row?.score ?? 0
-      return { iso, label: WEEK_DAY_LABELS[i], max, score: sc }
+      const bonus = row?.bonus_score ?? 0
+      return { iso, label: WEEK_DAY_LABELS[i], max, score: sc, bonus }
     })
   }, [weekData])
 
@@ -169,7 +208,8 @@ export default function FiatModePage() {
       userId,
       entry,
       computeScore(entry, SECTIONS),
-      MAX_SCORE
+      MAX_SCORE,
+      computeBonusScore(entry, SECTIONS)
     )
     if (error) {
       setSaveError(error.message)
@@ -191,7 +231,8 @@ export default function FiatModePage() {
     const sections = getSectionsForDate(viewDate)
     const sc = computeScore(next, sections)
     const mx = maxScoreForSections(sections)
-    const { error } = await upsertFiatDay(userId, next, sc, mx)
+    const bsc = computeBonusScore(next, sections)
+    const { error } = await upsertFiatDay(userId, next, sc, mx, bsc)
     if (error) {
       setSaveError(error.message)
       return
@@ -489,6 +530,56 @@ export default function FiatModePage() {
           white-space: nowrap;
         }
 
+        .fcheck-bonus-badge {
+          font-family: 'Cinzel', serif;
+          font-size: 0.5rem;
+          font-weight: 600;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: rgba(201,168,76,0.85);
+          border: 1px solid rgba(201,168,76,0.45);
+          background: rgba(201,168,76,0.08);
+          border-radius: 4px;
+          padding: 0.1em 0.45em;
+          white-space: nowrap;
+        }
+
+        .fsection.bonus-section {
+          border-color: rgba(201,168,76,0.25);
+          background: rgba(201,168,76,0.03);
+        }
+        .fsection.bonus-section.complete {
+          border-color: rgba(201,168,76,0.5);
+          background: rgba(201,168,76,0.06);
+          box-shadow: 0 0 18px rgba(201,168,76,0.12);
+        }
+
+        .fsection-bonus-label {
+          font-family: 'Cinzel', serif;
+          font-size: 0.45rem;
+          font-weight: 600;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          color: rgba(201,168,76,0.6);
+          border: 1px solid rgba(201,168,76,0.3);
+          background: rgba(201,168,76,0.07);
+          border-radius: 3px;
+          padding: 0.12em 0.5em;
+          white-space: nowrap;
+          margin-left: 0.25rem;
+        }
+
+        .fprogress-track.bonus .fprogress-fill {
+          background: linear-gradient(90deg, #9b8ec4, #c9a84c, #f0c84c);
+        }
+
+        .fprogress-bonus {
+          color: #c9a84c;
+          font-size: 0.65rem;
+          letter-spacing: 0.1em;
+          margin-left: 0.1em;
+        }
+
         .fcheck-media-btn {
           flex-shrink: 0;
           font-family: 'Cinzel', serif;
@@ -753,17 +844,20 @@ export default function FiatModePage() {
 
         {/* Score ring */}
         <div className={`fscore-area freveal ${animatedIn ? 'in' : ''}`} style={{ animationDelay: '140ms' }}>
-          <ScoreRing score={score} max={MAX_SCORE} />
+          <ScoreRing score={score} max={MAX_SCORE} bonus={bonusScore} />
           <div className="fscore-label">Daily Fidelity Score</div>
         </div>
 
         {/* Progress bar */}
-        <div className="fprogress-track">
-          <div className="fprogress-fill" style={{ transform: `scaleX(${score / MAX_SCORE})` }} />
+        <div className={`fprogress-track${bonusScore > 0 ? ' bonus' : ''}`}>
+          <div className="fprogress-fill" style={{ transform: `scaleX(${Math.min(score / MAX_SCORE, 1)})` }} />
         </div>
         <div className="fprogress-row">
           <span className="fprogress-tag">Fidelity</span>
-          <span className="fprogress-num">{score} / {MAX_SCORE}</span>
+          <span className="fprogress-num">
+            {score} / {MAX_SCORE}
+            {bonusScore > 0 && <span className="fprogress-bonus"> · +{bonusScore}</span>}
+          </span>
         </div>
         {!dataReady && (
           <div className="fiat-loading-hint">Loading today from server…</div>
@@ -777,11 +871,12 @@ export default function FiatModePage() {
           const done = sec.checks.filter(c => entry[c.key]).length
           const total = sec.checks.length
           const allDone = done === total
+          const isAllBonus = sec.checks.length > 0 && sec.checks.every(c => c.bonus)
 
           return (
             <div
               key={sec.id}
-              className={`fsection freveal ${animatedIn ? 'in' : ''} ${allDone ? 'complete' : ''}`}
+              className={`fsection freveal ${animatedIn ? 'in' : ''} ${allDone ? 'complete' : ''} ${isAllBonus ? 'bonus-section' : ''}`}
               style={{ animationDelay: `${180 + sIdx * 55}ms` }}
             >
               <div className="fsection-hdr">
@@ -789,8 +884,9 @@ export default function FiatModePage() {
                 <div style={{ flex: 1 }}>
                   <div className="fsection-name" style={allDone ? { color: sec.color } : {}}>
                     {sec.title}
+                    {isAllBonus && <span className="fsection-bonus-label">✦ BONUS</span>}
                   </div>
-                  <div className="fsection-sub">{sec.subtitle}</div>
+                  <div className="fsection-sub">{isAllBonus ? 'Optional · Bonus points' : sec.subtitle}</div>
                 </div>
                 <div className="fsection-count">
                   {done}/{total}
@@ -801,6 +897,7 @@ export default function FiatModePage() {
               {sec.checks.map(check => {
                 const checked = entry[check.key]
                 const media = check.media
+                const checkColor = check.bonus ? '#c9a84c' : sec.color
                 return (
                   <div
                     key={check.key}
@@ -812,13 +909,14 @@ export default function FiatModePage() {
                     <div
                       className="fcheck-box"
                       style={checked
-                        ? { borderColor: sec.color, background: `${sec.color}22`, boxShadow: `0 0 6px ${sec.color}33` }
+                        ? { borderColor: checkColor, background: `${checkColor}22`, boxShadow: `0 0 6px ${checkColor}33` }
                         : {}}
                     >
-                      {checked && <span style={{ color: sec.color }}>✓</span>}
+                      {checked && <span style={{ color: checkColor }}>✓</span>}
                     </div>
                     <span className={`fcheck-label${checked ? ' on' : ''}`}>{check.label}</span>
                     {check.required && <span className="fcheck-required">Required</span>}
+                    {check.bonus && <span className="fcheck-bonus-badge">✦ Bonus</span>}
                     {media && (
                       <button
                         type="button"
@@ -867,10 +965,19 @@ export default function FiatModePage() {
               const active = slot.iso === viewDate
               const col = ratio >= 0.9 ? '#c9a84c' : ratio >= 0.75 ? '#a8c4e0' : ratio >= 0.6 ? '#8ab4a0' : '#9b8ec4'
               const h = Math.max(3, Math.round(ratio * 52))
+              const hasBonus = slot.bonus > 0
               return (
                 <div key={slot.iso} className="fweek-col" onClick={() => void handlePickDay(slot.iso)}>
                   <div className="fweek-day">{slot.label}</div>
                   <div className="fweek-bar-wrap">
+                    {hasBonus && (
+                      <div style={{
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: '#c9a84c',
+                        marginBottom: '3px',
+                        boxShadow: '0 0 4px rgba(201,168,76,0.6)',
+                      }} />
+                    )}
                     <div className={`fweek-bar${active ? ' sel' : ''}`}
                       style={{ height: `${h}px`, background: active ? col : `${col}55` }} />
                   </div>
@@ -892,6 +999,7 @@ export default function FiatModePage() {
                     <th>Score</th>
                     <th>Max</th>
                     <th>%</th>
+                    <th>Bonus</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -912,6 +1020,9 @@ export default function FiatModePage() {
                         <td>{slot.score}</td>
                         <td>{slot.max}</td>
                         <td className="fhist-pct">{pct}%</td>
+                        <td style={{ color: slot.bonus > 0 ? 'rgba(201,168,76,0.8)' : 'rgba(255,255,255,0.15)' }}>
+                          {slot.bonus > 0 ? `+${slot.bonus} ✦` : '—'}
+                        </td>
                       </tr>
                     )
                   })}

@@ -3,6 +3,7 @@ import type { DailyEntry } from '../features/fiat/fiatScoring'
 import {
   mergeEntryFromChecks,
   computeScore,
+  computeBonusScore,
   getSectionsForDate,
   maxScoreForSections,
 } from '../features/fiat/fiatScoring'
@@ -12,6 +13,7 @@ export interface FiatDayRow {
   checks: unknown
   score: number
   max_score: number
+  bonus_score: number
 }
 
 /** Week range for the signed-in user only (no localStorage). */
@@ -23,7 +25,7 @@ export async function fetchFiatRange(
   const map = new Map<string, FiatDayRow>()
   const { data, error } = await supabase
     .from('fiat_daily_entries')
-    .select('day, checks, score, max_score')
+    .select('day, checks, score, max_score, bonus_score')
     .eq('user_id', userId)
     .gte('day', startIso)
     .lte('day', endIso)
@@ -39,6 +41,7 @@ export async function fetchFiatRange(
       checks: row.checks,
       score: row.score ?? 0,
       max_score: row.max_score ?? 0,
+      bonus_score: row.bonus_score ?? 0,
     })
   }
   return map
@@ -48,7 +51,8 @@ export async function upsertFiatDay(
   userId: string,
   entry: DailyEntry,
   score: number,
-  maxScore: number
+  maxScore: number,
+  bonusScore: number = 0
 ): Promise<{ error: Error | null }> {
   const checks: Record<string, boolean> = {}
   for (const k of Object.keys(entry) as (keyof DailyEntry)[]) {
@@ -63,6 +67,7 @@ export async function upsertFiatDay(
       checks,
       score,
       max_score: maxScore,
+      bonus_score: bonusScore,
     },
     { onConflict: 'user_id,day' }
   )
@@ -93,6 +98,7 @@ export function fiatDayRowFromEntry(entry: DailyEntry): FiatDayRow {
     checks,
     score: computeScore(entry, sections),
     max_score: maxScoreForSections(sections),
+    bonus_score: computeBonusScore(entry, sections),
   }
 }
 

@@ -32,6 +32,7 @@ export interface FiatCheck {
   label: string
   points: number
   required?: boolean
+  bonus?: boolean
   sundayOnly?: boolean
   weekdayOnly?: boolean
   media?: CheckMedia
@@ -105,7 +106,7 @@ const ALL_SECTIONS: Section[] = [
     color: '#e8d5a3',
     checks: [
       { key: 'sunday_mass', label: 'Sunday Mass', points: 40, required: true, sundayOnly: true },
-      { key: 'eucharist', label: 'Daily Mass (optional)', points: 40, weekdayOnly: true },
+      { key: 'eucharist', label: 'Daily Mass (optional)', points: 30, bonus: true, weekdayOnly: true },
     ],
   },
   {
@@ -118,21 +119,21 @@ const ALL_SECTIONS: Section[] = [
       {
         key: 'fiat_morning',
         label: 'Morning Offering-The Prevenient Act',
-        points: 20,
+        points: 30,
         media: { kind: 'youtube', url: FIAT_MEDIA.prevenientAct },
       },
-      { key: 'fiat_day', label: 'Fusing in the Divine Will', points: 20 },
-      { key: 'rosary', label: '__rosary__', points: 20 },
+      { key: 'fiat_day', label: 'Fusing in the Divine Will', points: 30 },
+      { key: 'rosary', label: '__rosary__', points: 30 },
       {
         key: 'angelus_noon',
         label: 'Angelus · Noon',
-        points: 5,
+        points: 10,
         media: { kind: 'youtube', url: FIAT_MEDIA.angelus },
       },
       {
         key: 'angelus_evening',
         label: 'Angelus · 6pm',
-        points: 5,
+        points: 10,
         media: { kind: 'youtube', url: FIAT_MEDIA.angelus },
       },
     ],
@@ -188,13 +189,20 @@ export function getSectionsForDate(isoDate: string): Section[] {
 }
 
 export function maxScoreForSections(sections: Section[]): number {
-  return sections.flatMap(s => s.checks).reduce((sum, c) => sum + c.points, 0)
+  return sections.flatMap(s => s.checks).filter(c => !c.bonus).reduce((sum, c) => sum + c.points, 0)
 }
 
 export function computeScore(entry: DailyEntry, sections: Section[]): number {
   return sections
     .flatMap(s => s.checks)
-    .filter(c => entry[c.key])
+    .filter(c => !c.bonus && entry[c.key])
+    .reduce((sum, c) => sum + c.points, 0)
+}
+
+export function computeBonusScore(entry: DailyEntry, sections: Section[]): number {
+  return sections
+    .flatMap(s => s.checks)
+    .filter(c => c.bonus === true && entry[c.key])
     .reduce((sum, c) => sum + c.points, 0)
 }
 
