@@ -1,41 +1,36 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Trash2, CheckCircle2, Circle, ShoppingCart, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
-import type { ShoppingItem, StoreProduct } from "../../domain/types";
+import type { ShoppingItem } from "../../domain/types";
 import { formatQuantity, isUnmeasuredQuantity, toBaseUnit } from "./quantityUtils";
 import { v4 as uuidv4 } from "../../storage/uuid";
 import { formatDateLocal, getMondayLocal } from "../../lib/dateUtils";
-import {
-  getLinkedProductsForIngredients,
-  upsertLinkedProductForIngredient,
-  unlinkProductForIngredient,
-  type LinkedProduct,
-} from "../product-linking/api";
 import {
   markAggregatedItemPurchased,
   fetchPurchasedShoppingItems,
   type PurchasedShoppingItem,
 } from "./api";
 import { unmarkPurchasedShoppingItem } from "./api";
-import { getStoreProducts } from "../store-products/api";
-import { getShoppingTrips } from "../shopping-trips/api";
+import { getShoppingTrips, updateShoppingTripItem } from "../shopping-trips/api";
 import { supabase } from "../../lib/supabase";
+import {
+  resolvePreferredProductsForIngredientNames,
+  resolvePreferredProductsForIngredientIds,
+  type IngredientProductPreference,
+} from "../ingredients/api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const DROPDOWN_CLOSE_DELAY_MS = 150;
-
-function parseSizeLabelForLink(sizeLabel: string): { packSize: number; unit: 'g' | 'ml' | 'units' } | null {
-  const match = sizeLabel.trim().match(/^(\d+(?:\.\d+)?)\s*(.*)$/i);
-  if (!match) return null;
-  const qty = parseFloat(match[1]);
-  if (isNaN(qty) || qty <= 0) return null;
-  const u = match[2].trim().toLowerCase();
-  if (u === 'kg') return { packSize: qty * 1000, unit: 'g' };
-  if (u === 'g') return { packSize: qty, unit: 'g' };
-  if (u === 'l') return { packSize: qty * 1000, unit: 'ml' };
-  if (u === 'ml') return { packSize: qty, unit: 'ml' };
-  return { packSize: qty, unit: 'units' };
+function parseProductBaseSize(product: IngredientProductPreference): { qty: number; unit: 'g' | 'ml' | 'units' } | null {
+  const size = Number(product.sizeValue ?? 0);
+  const unit = String(product.sizeUnitCode ?? '').toLowerCase();
+  if (!(size > 0) || !unit) return null;
+  if (unit === 'kg') return { qty: size * 1000, unit: 'g' };
+  if (unit === 'g') return { qty: size, unit: 'g' };
+  if (unit === 'l') return { qty: size * 1000, unit: 'ml' };
+  if (unit === 'ml') return { qty: size, unit: 'ml' };
+  if (unit === 'units') return { qty: size, unit: 'units' };
+  return null;
 }
 
 type SectionKey = 'trip' | 'manual' | 'done';
@@ -49,9 +44,10 @@ export default function ShoppingPage() {
   const [manualItems, setManualItems] = useState<ShoppingItem[]>([]);
   const [newItemName, setNewItemName] = useState("");
   const [listLoading, setListLoading] = useState(false);
-  const [linkedByName, setLinkedByName] = useState<Map<string, LinkedProduct>>(new Map());
-  const [linkingIngredient, setLinkingIngredient] = useState<string | null>(null);
-  const [storeProducts, setStoreProducts] = useState<StoreProduct[]>([]);
+  const [alternativesByItemId, setAlternativesByItemId] = useState<Map<string, IngredientProductPreference[]>>(new Map());
+  const [ingredientLabelByItemId, setIngredientLabelByItemId] = useState<Map<string, string>>(new Map());
+  const [ingredientIdByItemId, setIngredientIdByItemId] = useState<Map<string, string>>(new Map());
+  const [swappingItem, setSwappingItem] = useState<any | null>(null);
   const [purchasedItems, setPurchasedItems] = useState<PurchasedShoppingItem[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Set<SectionKey>>(new Set());
   const [showAddForm, setShowAddForm] = useState(false);
@@ -65,9 +61,6 @@ export default function ShoppingPage() {
     setStartDate(formatDateLocal(monday));
     setEndDate(formatDateLocal(sunday));
 
-    getStoreProducts()
-      .then(setStoreProducts)
-      .catch(err => console.error('Failed to load store products:', err));
   }, []);
 
   useEffect(() => {
@@ -132,6 +125,69 @@ export default function ShoppingPage() {
         })
         .filter((item: ShoppingItem) => !item.quantity || !isUnmeasuredQuantity(item.quantity));
         setAggregatedItems(items);
+        const itemRows = latest.items as Array<any>;
+        const storeProductIds = Array.from(
+          new Set(
+            itemRows
+              .map((ti) => ti.storeProductId)
+              .filter(Boolean)
+          )
+        );
+
+        let productToIngredientId = new Map<string, string>();
+        if (storeProductIds.length > 0) {
+          const { data: spRows, error: spErr } = await supabase
+            .from('store_products')
+            .select('id, ingredient_id')
+            .in('id', storeProductIds);
+          if (spErr) throw spErr;
+          productToIngredientId = new Map(
+            ((spRows ?? []) as Array<{ id: string; ingredient_id: string | null }>)
+              .filter((r) => Boolean(r.ingredient_id))
+              .map((r) => [r.id, r.ingredient_id as string])
+          );
+        }
+
+        const fallbackIngredientNames = Array.from(
+          new Set(
+            itemRows
+              .filter((ti) => !ti.storeProductId || !productToIngredientId.has(ti.storeProductId))
+              .map((ti) => (ti.ingredientName || ti.productName || '').trim())
+              .filter(Boolean)
+          )
+        );
+
+        const resolvedByName = await resolvePreferredProductsForIngredientNames(fallbackIngredientNames);
+        const ingredientIds = new Set<string>();
+        for (const row of itemRows) {
+          const byProduct = row.storeProductId ? productToIngredientId.get(row.storeProductId) : null;
+          if (byProduct) {
+            ingredientIds.add(byProduct);
+            continue;
+          }
+          const fallback = resolvedByName.get(String(row.ingredientName || row.productName || '').trim().toLowerCase());
+          if (fallback?.ingredientId) ingredientIds.add(fallback.ingredientId);
+        }
+
+        const resolvedById = await resolvePreferredProductsForIngredientIds(Array.from(ingredientIds));
+        const nextByItemId = new Map<string, IngredientProductPreference[]>();
+        const nextLabelByItemId = new Map<string, string>();
+        const nextIngredientIdByItemId = new Map<string, string>();
+        for (const row of itemRows) {
+          const byProduct = row.storeProductId ? productToIngredientId.get(row.storeProductId) : null;
+          const fallback = resolvedByName.get(String(row.ingredientName || row.productName || '').trim().toLowerCase());
+          const ingredientId = byProduct ?? fallback?.ingredientId ?? null;
+          if (!ingredientId) continue;
+          const resolved = resolvedById.get(ingredientId);
+          if (!resolved) continue;
+          const list = [resolved.product, ...resolved.alternatives].filter((p): p is IngredientProductPreference => Boolean(p));
+          nextByItemId.set(row.id, list);
+          nextLabelByItemId.set(row.id, resolved.ingredientName);
+          nextIngredientIdByItemId.set(row.id, ingredientId);
+        }
+        setAlternativesByItemId(nextByItemId);
+        setIngredientLabelByItemId(nextLabelByItemId);
+        setIngredientIdByItemId(nextIngredientIdByItemId);
       }
       await refreshPurchased();
     } catch (err) {
@@ -245,83 +301,67 @@ export default function ShoppingPage() {
   const isManualCollapsed = collapsedSections.has('manual');
   const isDoneCollapsed = collapsedSections.has('done');
 
-  // ── Link Product Modal ────────────────────────────────────────────────────────
-
-  function LinkProductModal({ ingredientName, onClose }: { ingredientName: string; onClose: () => void }) {
-    const existing = linkedByName.get(ingredientName.toLowerCase());
-    const [productName, setProductName] = useState(existing?.productName ?? "");
-    const [store, setStore] = useState(existing?.store ?? "Coles");
-    const [unit, setUnit] = useState<'g' | 'ml' | 'units'>(
-      existing?.packSizeG ? 'g' : existing?.packSizeMl ? 'ml' : 'units'
-    );
-    const [packSize, setPackSize] = useState(
-      existing?.packSizeG ?? existing?.packSizeMl ?? existing?.packSizeUnits ?? 0
-    );
-    const [showSuggestions, setShowSuggestions] = useState(false);
+  function SwapProductModal({ item, onClose }: { item: any; onClose: () => void }) {
+    const [options, setOptions] = useState<IngredientProductPreference[]>(alternativesByItemId.get(item.id) ?? []);
+    const ingredientLabel = ingredientLabelByItemId.get(item.id) ?? item.ingredientName ?? item.name;
+    const ingredientId = ingredientIdByItemId.get(item.id) ?? null;
     const [saving, setSaving] = useState(false);
-    const [error, setError] = useState('');
-    const comboboxRef = useRef<HTMLDivElement>(null);
+    const [loadingOptions, setLoadingOptions] = useState(false);
 
-    const suggestions = storeProducts.filter(p => {
-      if (!productName.trim()) return true;
-      const q = productName.toLowerCase();
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.brand?.toLowerCase().includes(q) ?? false)
-      );
-    });
+    useEffect(() => {
+      let active = true;
+      async function loadLiveOptions() {
+        if (!ingredientId && !ingredientLabel) return;
+        setLoadingOptions(true);
+        try {
+          const byId = ingredientId
+            ? await resolvePreferredProductsForIngredientIds([ingredientId])
+            : new Map();
+          const byName = ingredientLabel
+            ? await resolvePreferredProductsForIngredientNames([ingredientLabel])
+            : new Map();
+          if (!active) return;
 
-    const handleSelectProduct = (product: StoreProduct) => {
-      const displayName = [product.brand, product.name].filter(Boolean).join(' ');
-      setProductName(displayName);
-      setStore(product.store ?? 'Coles');
-      if (product.sizeLabel) {
-        const parsed = parseSizeLabelForLink(product.sizeLabel);
-        if (parsed) {
-          setPackSize(parsed.packSize);
-          setUnit(parsed.unit);
+          const fromId = ingredientId
+            ? byId.get(ingredientId)
+            : undefined;
+          const fromName = byName.get(String(ingredientLabel).trim().toLowerCase());
+
+          const listFromId = fromId
+            ? [fromId.product, ...fromId.alternatives].filter((p): p is IngredientProductPreference => Boolean(p))
+            : [];
+          const listFromName = fromName
+            ? [fromName.product, ...fromName.alternatives].filter((p): p is IngredientProductPreference => Boolean(p))
+            : [];
+
+          // Prefer the richer set; this guards against edge cases where item-level mapping is incomplete.
+          const nextOptions = listFromName.length > listFromId.length ? listFromName : listFromId;
+          setOptions(nextOptions);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          if (active) setLoadingOptions(false);
         }
       }
-      setShowSuggestions(false);
-    };
+      loadLiveOptions();
+      return () => { active = false; };
+    }, [ingredientId, ingredientLabel]);
 
-    const handleSave = async () => {
-      if (!productName.trim()) { setError('Product name is required.'); return; }
-      if (!(packSize > 0)) { setError('Pack size must be greater than zero.'); return; }
+    const handleSwap = async (product: IngredientProductPreference) => {
       setSaving(true);
-      setError('');
       try {
-        await upsertLinkedProductForIngredient(ingredientName, {
-          productName: productName.trim(),
-          store: store.trim(),
-          packSize: Number(packSize),
-          unit,
+        const base = parseProductBaseSize(product);
+        await updateShoppingTripItem(item.id, {
+          productName: [product.brand, product.name].filter(Boolean).join(' '),
+          packQuantity: base?.qty ?? null,
+          packUnit: base?.unit ?? null,
+          storeProductId: product.storeProductId,
         });
-        const links = await getLinkedProductsForIngredients([ingredientName]);
-        const updated = new Map(linkedByName);
-        for (const [k, v] of links) updated.set(k, v);
-        setLinkedByName(updated);
+        await generateShoppingList();
         onClose();
       } catch (err) {
         console.error(err);
-        setError('Failed to save link.');
-      } finally {
-        setSaving(false);
-      }
-    };
-
-    const handleUnlink = async () => {
-      setSaving(true);
-      setError('');
-      try {
-        await unlinkProductForIngredient(ingredientName);
-        const updated = new Map(linkedByName);
-        updated.delete(ingredientName.toLowerCase());
-        setLinkedByName(updated);
-        onClose();
-      } catch (err) {
-        console.error(err);
-        setError('Failed to unlink product.');
+        alert('Failed to swap product.');
       } finally {
         setSaving(false);
       }
@@ -330,84 +370,36 @@ export default function ShoppingPage() {
     return (
       <div className="modal-overlay" onClick={onClose}>
         <div className="modal" onClick={e => e.stopPropagation()}>
-          <h2>Link Product</h2>
-          <p><strong>{ingredientName}</strong></p>
-          {error && <p className="form-error">{error}</p>}
-          <div className="form-group">
-            <label className="app-label">Product name</label>
-            <div className="link-product-combobox" ref={comboboxRef}>
-              <input
-                type="text"
-                className="app-input"
-                value={productName}
-                onChange={e => { setProductName(e.target.value); setShowSuggestions(true); }}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), DROPDOWN_CLOSE_DELAY_MS)}
-                placeholder='Search or type a product name…'
-                autoComplete="off"
-              />
-              {showSuggestions && suggestions.length > 0 && (
-                <ul className="link-product-suggestions" role="listbox">
-                  {suggestions.map(product => (
-                    <li
-                      key={product.id}
-                      className="link-product-suggestion-item"
-                      onMouseDown={() => handleSelectProduct(product)}
-                      role="option"
-                    >
-                      <span className="suggestion-name">
-                        {product.brand ? `${product.brand} ` : ''}{product.name}
-                      </span>
-                      {product.sizeLabel && (
-                        <span className="suggestion-meta">{product.sizeLabel}</span>
-                      )}
-                      <span className="suggestion-store">{product.store}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="app-label">Store</label>
-            <select className="app-input" value={store} onChange={e => setStore(e.target.value)}>
-              <option value="Coles">Coles</option>
-              <option value="Woolworths">Woolworths</option>
-              <option value="IGA">IGA</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
-          <div className="form-group inline">
-            <div>
-              <label className="app-label">Pack size</label>
-              <input
-                type="number"
-                className="app-input"
-                min={0.01}
-                step={0.01}
-                value={packSize}
-                onChange={e => setPackSize(parseFloat(e.target.value))}
-              />
-            </div>
-            <div>
-              <label className="app-label">Unit</label>
-              <select className="app-input" value={unit} onChange={e => setUnit(e.target.value as 'g' | 'ml' | 'units')}>
-                <option value="g">g</option>
-                <option value="ml">ml</option>
-                <option value="units">units</option>
-              </select>
-            </div>
+          <h2>Swap Product</h2>
+          <p><strong>{ingredientLabel}</strong></p>
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            {options.map((product) => (
+              <button
+                key={product.storeProductId}
+                className="btn-app-ghost"
+                disabled={saving}
+                onClick={() => handleSwap(product)}
+                style={{ textAlign: 'left' }}
+              >
+                <span>
+                  {product.brand && (
+                    <span style={{ color: 'var(--text-subtle)', fontStyle: 'italic', marginRight: '0.35rem' }}>
+                      {product.brand}
+                    </span>
+                  )}
+                  <span>{product.name}{product.sizeLabel ? ` (${product.sizeLabel})` : ''}</span>
+                </span>
+              </button>
+            ))}
+            {loadingOptions && (
+              <p className="form-hint">Loading products…</p>
+            )}
+            {!loadingOptions && options.length === 0 && (
+              <p className="form-hint">No alternatives configured for this ingredient.</p>
+            )}
           </div>
           <div className="modal-actions">
-            <button className="btn-app-primary" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            {existing && (
-              <button className="btn-app-secondary btn-danger" onClick={handleUnlink} disabled={saving}>
-                Unlink
-              </button>
-            )}
-            <button className="btn-app-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn-app-secondary" onClick={onClose}>Close</button>
           </div>
         </div>
       </div>
@@ -636,19 +628,19 @@ export default function ShoppingPage() {
                     )}
                   </div>
                   <button
-                    onClick={() => setLinkingIngredient(item.name)}
+                    onClick={() => setSwappingItem(item)}
                     style={{
                       background: 'none', border: 'none', cursor: 'pointer',
                       padding: '0.25rem', flexShrink: 0, display: 'flex', alignItems: 'center',
-                      opacity: linkedByName.has(item.name.toLowerCase()) ? 1 : 0.35,
+                      opacity: 0.8,
                       transition: 'opacity 0.15s', fontSize: '0.85rem',
                     }}
-                    aria-label="Link product"
-                    title={linkedByName.has(item.name.toLowerCase()) ? 'Edit product link' : 'Link a product'}
+                    aria-label="Swap product"
+                    title="Swap product"
                     onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                    onMouseLeave={e => (e.currentTarget.style.opacity = linkedByName.has(item.name.toLowerCase()) ? '1' : '0.35')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
                   >
-                    🔗
+                    🔄
                   </button>
                 </div>
               ))}
@@ -854,10 +846,10 @@ export default function ShoppingPage() {
         </div>
       </section>
 
-      {linkingIngredient && (
-        <LinkProductModal
-          ingredientName={linkingIngredient}
-          onClose={() => setLinkingIngredient(null)}
+      {swappingItem && (
+        <SwapProductModal
+          item={swappingItem}
+          onClose={() => setSwappingItem(null)}
         />
       )}
 

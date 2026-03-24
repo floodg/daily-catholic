@@ -153,7 +153,7 @@ export default function ListPage<T extends ListItem>({
 
         {/* Detail panel */}
         {panelOpen ? (
-          <div className="app-card" style={{ position: 'sticky', top: '72px' }}>
+          <div className="app-card" style={{ position: 'sticky', top: '72px', overflow: 'visible' }}>
             <div style={{
               padding: '1rem 1.25rem 0.75rem',
               borderBottom: '1px solid var(--app-border)',
@@ -169,7 +169,7 @@ export default function ListPage<T extends ListItem>({
                 <X size={16} />
               </button>
             </div>
-            <div style={{ padding: '1.25rem', maxHeight: 'calc(100vh - 160px)', overflowY: 'auto' }}>
+            <div style={{ padding: '1.25rem' }}>
               {renderDetail(panelMode === 'new' ? null : selected, handleClose, panelMode, setPanelMode)}
             </div>
           </div>

@@ -378,27 +378,16 @@ update public.starter_meal_ingredients
   set store_product_id = '11111111-0001-0001-0001-000000000001'
   where id = 'aaaaaaaa-0001-0001-0001-000000000009'; -- Extra mozzarella (top)
 
--- Almond meal alternative products
-insert into public.starter_meal_ingredient_product_options
-  (starter_meal_ingredient_id, store_product_id, sort_order)
+-- Ingredient-level alternative products (canonical)
+insert into public.ingredient_store_product_options
+  (ingredient_id, store_product_id, sort_order)
 values
-  ('aaaaaaaa-0001-0001-0001-000000000003', '11111111-0001-0001-0001-000000000005', 0),
-  ('aaaaaaaa-0001-0001-0001-000000000003', '11111111-0001-0001-0001-000000000007', 1)
-on conflict (starter_meal_ingredient_id, store_product_id) do nothing;
-
--- Mozzarella cheese alternative product
-insert into public.starter_meal_ingredient_product_options
-  (starter_meal_ingredient_id, store_product_id, sort_order)
-values
-  ('aaaaaaaa-0001-0001-0001-000000000001', '11111111-0001-0001-0001-000000000002', 0)
-on conflict (starter_meal_ingredient_id, store_product_id) do nothing;
-
--- Cream cheese alternative product
-insert into public.starter_meal_ingredient_product_options
-  (starter_meal_ingredient_id, store_product_id, sort_order)
-values
-  ('aaaaaaaa-0001-0001-0001-000000000002', '11111111-0001-0001-0001-000000000004', 0)
-on conflict (starter_meal_ingredient_id, store_product_id) do nothing;
+  ('33333333-0001-0001-0001-000000000003', '11111111-0001-0001-0001-000000000005', 0), -- Almond meal -> Macro
+  ('33333333-0001-0001-0001-000000000003', '11111111-0001-0001-0001-000000000007', 1), -- Almond meal -> Honest to Goodness
+  ('33333333-0001-0001-0001-000000000001', '11111111-0001-0001-0001-000000000002', 0), -- Mozzarella cheese -> Bulla
+  ('33333333-0001-0001-0001-000000000002', '11111111-0001-0001-0001-000000000004', 0), -- Cream cheese -> Philadelphia
+  ('33333333-0001-0001-0001-000000000012', '11111111-0001-0001-0001-000000000002', 0)  -- Cheese -> Bulla Mozzarella
+on conflict (ingredient_id, store_product_id) do nothing;
 
 -- 250g Mince Taco Bowl
 with taco as (

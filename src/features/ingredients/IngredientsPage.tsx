@@ -5,6 +5,7 @@ import {
   createIngredient,
   updateIngredient,
   deleteIngredient,
+  saveIngredientProductPreferences,
 } from "./api";
 import { getStoreProducts } from "../store-products/api";
 import { ProductCombobox } from "../ingredient-products/IngredientProductsPage";
@@ -16,6 +17,7 @@ const EMPTY_FORM = {
   optional: false,
   pantryStaple: false,
   defaultStoreProductId: null as string | null,
+  alternativeStoreProductIds: [] as string[],
 };
 
 export default function IngredientsPage() {
@@ -80,12 +82,22 @@ export default function IngredientsPage() {
           pantryStaple: data.pantryStaple,
           defaultStoreProductId: data.defaultStoreProductId,
         });
+        await saveIngredientProductPreferences({
+          ingredientId: existing.id,
+          defaultStoreProductId: data.defaultStoreProductId,
+          alternativeStoreProductIds: data.alternativeStoreProductIds,
+        });
       } else {
-        await createIngredient({
+        const created = await createIngredient({
           name: data.name.trim(),
           optional: data.optional,
           pantryStaple: data.pantryStaple,
           defaultStoreProductId: data.defaultStoreProductId,
+        });
+        await saveIngredientProductPreferences({
+          ingredientId: created.id,
+          defaultStoreProductId: data.defaultStoreProductId,
+          alternativeStoreProductIds: data.alternativeStoreProductIds,
         });
       }
       await load();
@@ -214,11 +226,19 @@ function IngredientForm({
     optional: initialItem?.optional ?? false,
     pantryStaple: initialItem?.pantryStaple ?? false,
     defaultStoreProductId: initialItem?.defaultStoreProductId ?? null,
+    alternativeStoreProductIds: initialItem?.alternativeStoreProducts.map((p) => p.storeProductId) ?? [],
   }));
 
   const selectedProduct = localData.defaultStoreProductId
     ? products.find((p) => p.id === localData.defaultStoreProductId)
     : null;
+  const alternatives = localData.alternativeStoreProductIds
+    .map((id) => products.find((p) => p.id === id))
+    .filter((p): p is StoreProduct => Boolean(p));
+  const usedProductIds = [
+    ...(localData.defaultStoreProductId ? [localData.defaultStoreProductId] : []),
+    ...localData.alternativeStoreProductIds,
+  ];
 
   return (
     <div>
@@ -240,24 +260,35 @@ function IngredientForm({
 
       <div className="form-group">
         <div style={{ display: "grid", gap: "0.5rem" }}>
-          <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", fontFamily: "DM Sans, sans-serif", color: "var(--parchment)" }}>
-          <input
-            type="checkbox"
-            checked={localData.optional}
-            onChange={(e) => setLocalData({ ...localData, optional: e.target.checked })}
-            style={{ accentColor: "var(--gold)" }}
-          />
-          Optional (in recipes)
-        </label>
-          <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", fontFamily: "DM Sans, sans-serif", color: "var(--parchment)" }}>
-          <input
-            type="checkbox"
-            checked={localData.pantryStaple}
-            onChange={(e) => setLocalData({ ...localData, pantryStaple: e.target.checked })}
-            style={{ accentColor: "var(--protein-color)" }}
-          />
-          Pantry staple (excluded from shopping list)
-        </label>
+          {([
+            { key: "optional", label: "Optional (in recipes)", color: "var(--gold)" },
+            { key: "pantryStaple", label: "Pantry staple (excluded from shopping list)", color: "var(--protein-color)" },
+          ] as const).map(({ key, label, color }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setLocalData({ ...localData, [key]: !localData[key] })}
+              style={{
+                display: "flex", alignItems: "center", gap: "0.75rem",
+                padding: "0.625rem 0.875rem", borderRadius: 12, cursor: "pointer", textAlign: "left",
+                border: localData[key] ? `1.5px solid ${color}` : "1.5px solid var(--app-border)",
+                background: localData[key] ? "rgba(201,168,76,0.06)" : "rgba(255,255,255,0.02)",
+                transition: "border-color 0.15s, background 0.15s",
+              }}
+            >
+              <span style={{
+                width: 18, height: 18, borderRadius: 5, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                border: localData[key] ? `2px solid ${color}` : "2px solid var(--app-border)",
+                background: localData[key] ? color : "transparent",
+                transition: "all 0.15s",
+              }}>
+                {localData[key] && <span style={{ color: "#111520", fontSize: "0.7rem", fontWeight: 900, lineHeight: 1 }}>✓</span>}
+              </span>
+              <span style={{ fontFamily: "DM Sans, sans-serif", fontSize: "0.875rem", color: localData[key] ? "var(--parchment)" : "var(--text-muted)", transition: "color 0.15s" }}>
+                {label}
+              </span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -267,8 +298,8 @@ function IngredientForm({
           {selectedProduct ? (
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem",
-              border: "1px solid var(--app-border)", borderRadius: 14, padding: "0.75rem 0.875rem",
-              background: "rgba(253, 248, 242, 0.6)",
+              border: "1px solid var(--app-border-strong)", borderRadius: 14, padding: "0.75rem 0.875rem",
+              background: "var(--app-surface)",
             }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontFamily: "DM Sans, sans-serif", fontWeight: 650, color: "var(--parchment)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -296,6 +327,7 @@ function IngredientForm({
             <ProductCombobox
               placeholder="Search for a default product…"
               storeProducts={products}
+              excludeIds={localData.alternativeStoreProductIds}
               onSelect={(p) =>
                 setLocalData({ ...localData, defaultStoreProductId: p.id })
               }
@@ -303,6 +335,67 @@ function IngredientForm({
           )}
         </div>
         <p className="form-hint">Link this ingredient to a preferred product for shopping and meal planning.</p>
+      </div>
+
+      <div className="form-group">
+        <label className="app-label">Alternative products</label>
+        <div style={{ display: "grid", gap: "0.5rem" }}>
+          {alternatives.map((p) => (
+            <div
+              key={p.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.75rem",
+                border: "1px solid var(--app-border)",
+                borderRadius: 14,
+                padding: "0.65rem 0.75rem",
+                background: "var(--app-surface)",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontFamily: "DM Sans, sans-serif",
+                  fontWeight: 600,
+                  color: "var(--parchment)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}>
+                  {[p.brand, p.name].filter(Boolean).join(" ")}
+                </div>
+                {p.sizeLabel && (
+                  <div style={{ fontFamily: "DM Sans, monospace", fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.1rem" }}>
+                    {p.sizeLabel}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn-app-ghost"
+                onClick={() => setLocalData({
+                  ...localData,
+                  alternativeStoreProductIds: localData.alternativeStoreProductIds.filter((id) => id !== p.id),
+                })}
+                style={{ padding: "0.25rem 0.5rem", flexShrink: 0 }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <ProductCombobox
+            placeholder="Add alternative product…"
+            storeProducts={products}
+            excludeIds={usedProductIds}
+            onSelect={(p) =>
+              setLocalData({
+                ...localData,
+                alternativeStoreProductIds: [...localData.alternativeStoreProductIds, p.id],
+              })
+            }
+          />
+        </div>
       </div>
 
       <div className="form-actions">
