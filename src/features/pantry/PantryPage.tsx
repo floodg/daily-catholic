@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addStockByPacks, addStockDirect, getPantryItems, setAutoReorder, type PantryItem, type PurchaseBreakdown } from './api';
-import { getLinkedProductsForIngredients, type LinkedProduct } from '../product-linking/api';
-import type { MeasurementUnitCode } from '../../domain/types';
-import { getIngredientsCatalog, type IngredientCatalog } from '../ingredients/api';
+import { addStockByIngredientProduct, getPantryItems, setAutoReorder, type PantryItem, type PurchaseBreakdown } from './api';
+import {
+  getIngredientsCatalog,
+  resolvePreferredProductsForIngredientNames,
+  saveIngredientProductPreferences,
+  updateIngredient,
+  type IngredientCatalog,
+  type IngredientProductPreference,
+} from '../ingredients/api';
+import { getStoreProducts } from '../store-products/api';
+import { ProductCombobox } from '../ingredient-products/IngredientProductsPage';
+import type { StoreProduct } from '../../domain/types';
 import Combobox from '../../components/ui/Combobox';
 
 function daysSince(dateStr?: string): string {
@@ -25,8 +33,6 @@ function formatPurchaseBreakdown(b: PurchaseBreakdown): string {
   return `${b.quantity}${b.product_name ? ` ${b.product_name}` : ''} from ${b.store} ${formatTripDate(b.trip_date)}`;
 }
 
-type Unit = MeasurementUnitCode;
-
 interface AddStockModalProps {
   ingredientName?: string;
   onClose: () => void;
@@ -38,12 +44,10 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
   const [ingredients, setIngredients] = useState<IngredientCatalog[]>([]);
   const [ingredientsLoading, setIngredientsLoading] = useState(false);
   const [packs, setPacks] = useState<number>(1);
-  const [directQty, setDirectQty] = useState<number>(0);
-  const [directUnit, setDirectUnit] = useState<Unit>('g');
-  const [link, setLink] = useState<LinkedProduct | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [productMap, setProductMap] = useState<Map<string, { product: IngredientProductPreference | null; alternatives: IngredientProductPreference[] }>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'linked' | 'default' | 'manual'>('manual');
 
   // Load ingredient catalog for searchable dropdown
   useEffect(() => {
@@ -66,64 +70,76 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
     return () => { cancelled = true; };
   }, [ingredientName]);
 
-  useEffect(() => {
-    let active = true;
-    async function loadLink() {
-      if (!name.trim()) { setLink(null); return; }
-      try {
-        const map = await getLinkedProductsForIngredients([name.trim()]);
-        if (!active) return;
-        const found = map.get(name.trim().toLowerCase()) ?? null;
-        setLink(found ?? null);
-      } catch {
-        if (active) setLink(null);
-      }
-    }
-    loadLink();
-    return () => { active = false; };
-  }, [name]);
-
   const selectedIngredient = useMemo(
     () => ingredients.find(i => i.name.toLowerCase() === name.trim().toLowerCase()) ?? null,
     [ingredients, name]
   );
 
-  // Choose default mode when ingredient or link changes:
-  // Prefer default product if present; otherwise use linked; otherwise manual.
   useEffect(() => {
-    if (!name.trim()) {
-      setMode('manual');
-      return;
+    let active = true;
+    async function loadProductPreferences() {
+      if (!name.trim()) return;
+      try {
+        const map = await resolvePreferredProductsForIngredientNames([name.trim()]);
+        if (!active) return;
+        const resolved = map.get(name.trim().toLowerCase());
+        if (!resolved) {
+          setProductMap(new Map());
+          setSelectedProductId(null);
+          return;
+        }
+        const next = new Map(productMap);
+        next.set(name.trim().toLowerCase(), {
+          product: resolved.product,
+          alternatives: resolved.alternatives,
+        });
+        setProductMap(next);
+        setSelectedProductId(resolved.product?.storeProductId ?? null);
+      } catch (err) {
+        console.error(err);
+        if (active) {
+          setProductMap(new Map());
+          setSelectedProductId(null);
+        }
+      }
     }
-    if (selectedIngredient?.defaultStoreProductId) {
-      setMode(prev => (prev === 'linked' || prev === 'manual') ? 'default' : 'default');
-    } else if (link) {
-      setMode(prev => (prev === 'default' || prev === 'manual') ? 'linked' : 'linked');
-    } else {
-      setMode('manual');
-    }
-  }, [name, selectedIngredient?.defaultStoreProductId, link]);
+    loadProductPreferences();
+    return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name]);
 
-  const packSizeLabel = useMemo(() => {
-    if (!link) return null;
-    if (link.packSizeG) return `${link.packSizeG} g`;
-    if (link.packSizeMl) return `${link.packSizeMl} ml`;
-    if (link.packSizeUnits) return `${link.packSizeUnits} units`;
-    return null;
-  }, [link]);
+  const selectedProduct = useMemo(() => {
+    if (!name.trim()) return null;
+    const resolved = productMap.get(name.trim().toLowerCase());
+    if (!resolved) return null;
+    const all = [resolved.product, ...resolved.alternatives].filter((p): p is IngredientProductPreference => Boolean(p));
+    return all.find(p => p.storeProductId === selectedProductId) ?? null;
+  }, [name, productMap, selectedProductId]);
+
+  const alternatives = useMemo(() => {
+    if (!name.trim()) return [];
+    const resolved = productMap.get(name.trim().toLowerCase());
+    if (!resolved) return [];
+    const all = [resolved.product, ...resolved.alternatives].filter((p): p is IngredientProductPreference => Boolean(p));
+    return all;
+  }, [name, productMap]);
 
   const handleAdd = async () => {
     if (!name.trim()) { setError('Ingredient name is required.'); return; }
     setError('');
     setLoading(true);
     try {
-      if (mode === 'linked') {
-        if (!(link && packs > 0)) { setError('Enter a valid pack count.'); setLoading(false); return; }
-        await addStockByPacks(name.trim(), packs);
-      } else {
-        if (!(directQty > 0)) { setError('Enter a quantity greater than zero.'); setLoading(false); return; }
-        await addStockDirect(name.trim(), directUnit, directQty);
+      if (!selectedProductId) {
+        setError('No default product available for this ingredient.');
+        setLoading(false);
+        return;
       }
+      if (!(packs > 0)) {
+        setError('Enter a valid pack count.');
+        setLoading(false);
+        return;
+      }
+      await addStockByIngredientProduct(name.trim(), selectedProductId, packs);
       onAdded();
       onClose();
     } catch (err) {
@@ -148,9 +164,8 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
             getLabel={(i) => i.name}
             onSelectKey={(key) => {
               setName(key);
-              // Reset inputs when ingredient changes
+              setSelectedProductId(null);
               setPacks(1);
-              setDirectQty(0);
             }}
             placeholder={ingredientsLoading ? 'Loading ingredients…' : 'Search ingredients…'}
             wrapperClassName="ip-combobox"
@@ -159,87 +174,64 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
           />
         </div>
 
-        {/* Product selection */}
         {name.trim() && (
           <div className="form-group">
             <label className="app-label">Product</label>
             <div style={{ display: 'grid', gap: '0.5rem' }}>
-              {selectedIngredient?.defaultStoreProductName && (
-                <label className="radio-row">
-                  <input
-                    type="radio"
-                    name="productMode"
-                    checked={mode === 'default'}
-                    onChange={() => setMode('default')}
-                  />
-                  <span>
-                    Default product: <strong>{selectedIngredient.defaultStoreProductName}</strong>
-                  </span>
-                </label>
+              {alternatives.map((option) => (
+                <button
+                  key={option.storeProductId}
+                  type="button"
+                  onClick={() => setSelectedProductId(option.storeProductId)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    padding: '0.75rem 1rem', borderRadius: 12, cursor: 'pointer',
+                    border: selectedProductId === option.storeProductId ? '1.5px solid var(--gold)' : '1.5px solid var(--app-border)',
+                    background: selectedProductId === option.storeProductId ? 'rgba(201,168,76,0.08)' : 'rgba(255,255,255,0.03)',
+                    textAlign: 'left', transition: 'border-color 0.15s, background 0.15s',
+                  }}
+                >
+                  <span style={{
+                    width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                    border: selectedProductId === option.storeProductId ? '2px solid var(--gold)' : '2px solid var(--app-border)',
+                    background: selectedProductId === option.storeProductId ? 'var(--gold)' : 'transparent',
+                    boxShadow: selectedProductId === option.storeProductId ? '0 0 0 3px rgba(201,168,76,0.2)' : 'none',
+                    transition: 'all 0.15s',
+                  }} />
+                  <div>
+                    <div style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem', fontWeight: 600, color: 'var(--parchment)' }}>
+                      {[option.brand, option.name].filter(Boolean).join(' ')}
+                      {option.sizeLabel && <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: '0.4rem' }}>· {option.sizeLabel}</span>}
+                    </div>
+                    <div style={{ fontFamily: 'DM Sans, monospace', fontSize: '0.65rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                      {option.isDefault ? 'Default product' : 'Alternative product'}
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {alternatives.length === 0 && selectedIngredient && (
+                <p className="form-hint" style={{ margin: 0 }}>
+                  No product preferences found. Add a default product for this ingredient first.
+                </p>
               )}
-              {link && (
-                <label className="radio-row">
-                  <input
-                    type="radio"
-                    name="productMode"
-                    checked={mode === 'linked'}
-                    onChange={() => setMode('linked')}
-                  />
-                  <span>
-                    Linked product: <strong>{link.productName}</strong>
-                    {packSizeLabel ? <span> ({packSizeLabel} per pack)</span> : null}
-                  </span>
-                </label>
-              )}
-              <label className="radio-row">
-                <input
-                  type="radio"
-                  name="productMode"
-                  checked={mode === 'manual'}
-                  onChange={() => setMode('manual')}
-                />
-                <span>Enter quantity manually</span>
-              </label>
             </div>
           </div>
         )}
 
-        {/* Quantity controls */}
-        {mode === 'linked' ? (
-          <div className="form-group">
-            <label className="app-label">How many packs did you buy?</label>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={packs}
-              onChange={e => setPacks(parseInt(e.target.value || '0', 10))}
-              className="app-input"
-            />
-          </div>
-        ) : (
-          <div className="form-row">
-            <div className="form-group">
-              <label className="app-label">Quantity</label>
-              <input
-                type="number"
-                min={0.01}
-                step={0.01}
-                value={directQty}
-                onChange={e => setDirectQty(parseFloat(e.target.value))}
-                className="app-input"
-              />
-            </div>
-            <div className="form-group">
-              <label className="app-label">Unit</label>
-              <select value={directUnit} onChange={e => setDirectUnit(e.target.value as Unit)} className="app-input">
-                <option value="g">g</option>
-                <option value="ml">ml</option>
-                <option value="units">units</option>
-              </select>
-            </div>
-          </div>
-        )}
+        <div className="form-group">
+          <label className="app-label">How many packs did you buy?</label>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={packs}
+            onChange={e => setPacks(parseInt(e.target.value || '0', 10))}
+            className="app-input"
+          />
+          {selectedProduct?.sizeLabel && (
+            <p className="form-hint">Pack size: {selectedProduct.sizeLabel}</p>
+          )}
+        </div>
 
         <div className="modal-actions">
           <button className="btn-app-primary" onClick={handleAdd} disabled={loading}>
@@ -254,16 +246,25 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
 
 export default function PantryPage() {
   const [items, setItems] = useState<PantryItem[]>([]);
+  const [ingredientsCatalog, setIngredientsCatalog] = useState<IngredientCatalog[]>([]);
+  const [storeProducts, setStoreProducts] = useState<StoreProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [addingFor, setAddingFor] = useState<string | null>(null);
+  const [editingProductsFor, setEditingProductsFor] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError('');
     try {
-      const rows = await getPantryItems();
+      const [rows, catalogRows, products] = await Promise.all([
+        getPantryItems(),
+        getIngredientsCatalog(),
+        getStoreProducts(),
+      ]);
       setItems(Array.isArray(rows) ? rows : []);
+      setIngredientsCatalog(Array.isArray(catalogRows) ? catalogRows : []);
+      setStoreProducts(Array.isArray(products) ? products : []);
     } catch (err) {
       console.error(err);
       const msg = (err as Error)?.message;
@@ -366,6 +367,9 @@ export default function PantryPage() {
                     <button className="btn-app-ghost" onClick={() => setAddingFor(item.ingredientName)}>
                       + Add stock
                     </button>
+                    <button className="btn-app-ghost" onClick={() => setEditingProductsFor(item.ingredientName)}>
+                      Edit products
+                    </button>
                     <label className="pantry-auto-toggle">
                       <input
                         type="checkbox"
@@ -388,6 +392,16 @@ export default function PantryPage() {
           ingredientName={addingFor || undefined}
           onClose={() => setAddingFor(null)}
           onAdded={load}
+        />
+      )}
+
+      {editingProductsFor !== null && (
+        <EditIngredientProductsModal
+          ingredientName={editingProductsFor}
+          ingredients={ingredientsCatalog}
+          storeProducts={storeProducts}
+          onClose={() => setEditingProductsFor(null)}
+          onSaved={load}
         />
       )}
 
@@ -511,6 +525,231 @@ export default function PantryPage() {
           .pantry-grid { grid-template-columns: 1fr; }
         }
       `}</style>
+    </div>
+  );
+}
+
+interface EditIngredientProductsModalProps {
+  ingredientName: string;
+  ingredients: IngredientCatalog[];
+  storeProducts: StoreProduct[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function EditIngredientProductsModal({
+  ingredientName,
+  ingredients,
+  storeProducts,
+  onClose,
+  onSaved,
+}: EditIngredientProductsModalProps) {
+  const ingredient = ingredients.find(
+    (i) => i.name.trim().toLowerCase() === ingredientName.trim().toLowerCase()
+  ) ?? null;
+  const [saving, setSaving] = useState(false);
+  const [defaultStoreProductId, setDefaultStoreProductId] = useState<string | null>(ingredient?.defaultStoreProductId ?? null);
+  const [alternativeStoreProductIds, setAlternativeStoreProductIds] = useState<string[]>(
+    ingredient?.alternativeStoreProducts.map((p) => p.storeProductId) ?? []
+  );
+
+  if (!ingredient) {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <h2>Edit Products</h2>
+          <p className="form-error">Ingredient not found in catalog.</p>
+          <div className="modal-actions">
+            <button className="btn-app-secondary" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const selectedDefault = defaultStoreProductId
+    ? storeProducts.find((p) => p.id === defaultStoreProductId) ?? null
+    : null;
+  const alternatives = alternativeStoreProductIds
+    .map((id) => storeProducts.find((p) => p.id === id))
+    .filter((p): p is StoreProduct => Boolean(p));
+  const usedProductIds = [
+    ...(defaultStoreProductId ? [defaultStoreProductId] : []),
+    ...alternativeStoreProductIds,
+  ];
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await updateIngredient({
+        id: ingredient.id,
+        name: ingredient.name,
+        optional: ingredient.optional,
+        pantryStaple: ingredient.pantryStaple,
+        defaultStoreProductId,
+      });
+      await saveIngredientProductPreferences({
+        ingredientId: ingredient.id,
+        defaultStoreProductId,
+        alternativeStoreProductIds,
+      });
+      onSaved();
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save product links.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clearAll = async () => {
+    if (!confirm(`Remove all linked products for ${ingredient.name}?`)) return;
+    setSaving(true);
+    try {
+      await updateIngredient({
+        id: ingredient.id,
+        name: ingredient.name,
+        optional: ingredient.optional,
+        pantryStaple: ingredient.pantryStaple,
+        defaultStoreProductId: null,
+      });
+      await saveIngredientProductPreferences({
+        ingredientId: ingredient.id,
+        defaultStoreProductId: null,
+        alternativeStoreProductIds: [],
+      });
+      onSaved();
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to clear product links.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Edit Products</h2>
+        <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>
+          <strong>{ingredient.name}</strong>
+        </p>
+
+        <div className="form-group">
+          <label className="app-label">Default product</label>
+          {selectedDefault ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              border: '1px solid var(--app-border)',
+              borderRadius: 14,
+              padding: '0.75rem 0.875rem',
+              background: 'var(--app-surface)',
+            }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontFamily: 'DM Sans, sans-serif',
+                  fontWeight: 650,
+                  color: 'var(--parchment)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {[selectedDefault.brand, selectedDefault.name].filter(Boolean).join(' ')}
+                </div>
+                {selectedDefault.sizeLabel && (
+                  <div style={{ fontFamily: 'DM Sans, monospace', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                    {selectedDefault.sizeLabel}
+                  </div>
+                )}
+              </div>
+              <button
+                className="btn-app-ghost"
+                onClick={() => setDefaultStoreProductId(null)}
+                disabled={saving}
+                style={{ padding: '0.25rem 0.5rem', flexShrink: 0 }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <ProductCombobox
+              placeholder="Search for a default product…"
+              storeProducts={storeProducts}
+              excludeIds={alternativeStoreProductIds}
+              onSelect={(p) => setDefaultStoreProductId(p.id)}
+            />
+          )}
+        </div>
+
+        <div className="form-group">
+          <label className="app-label">Alternative products</label>
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            {alternatives.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  border: '1px solid var(--app-border)',
+                  borderRadius: 14,
+                  padding: '0.65rem 0.75rem',
+                  background: 'var(--app-surface)',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: 'DM Sans, sans-serif',
+                    fontWeight: 600,
+                    color: 'var(--parchment)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}>
+                    {[p.brand, p.name].filter(Boolean).join(' ')}
+                  </div>
+                  {p.sizeLabel && (
+                    <div style={{ fontFamily: 'DM Sans, monospace', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                      {p.sizeLabel}
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="btn-app-ghost"
+                  onClick={() => setAlternativeStoreProductIds((prev) => prev.filter((id) => id !== p.id))}
+                  disabled={saving}
+                  style={{ padding: '0.25rem 0.5rem', flexShrink: 0 }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+
+            <ProductCombobox
+              placeholder="Add alternative product…"
+              storeProducts={storeProducts}
+              excludeIds={usedProductIds}
+              onSelect={(p) => setAlternativeStoreProductIds((prev) => [...prev, p.id])}
+            />
+          </div>
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn-app-primary" onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button className="btn-app-secondary btn-danger" onClick={clearAll} disabled={saving}>
+            Delete Product Links
+          </button>
+          <button className="btn-app-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }

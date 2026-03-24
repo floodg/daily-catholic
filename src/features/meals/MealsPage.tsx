@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Clock, Flame, Plus, Trash2 } from "lucide-react";
 import type { Meal, Ingredient, MealIngredientProduct } from "../../domain/types";
 import { getMealsForUser, createMeal, updateMeal, deleteMeal } from "./api";
-import { upsertIngredientFlags, getIngredientsCatalog } from "../ingredients/api";
+import { upsertIngredientFlags, getIngredientsCatalog, resolvePreferredProductsForIngredientNames } from "../ingredients/api";
 import { useAuth } from "../../context/AuthProvider";
 import { v4 as uuidv4 } from "../../storage/uuid";
 import ListPage from "../../components/ui/ListPage";
@@ -508,17 +508,51 @@ function MealForm({ meal, pantryIngredientNames, saving, onSave, onCancel }: {
 /* ── Product Popup ───────────────────────────────────────────────────────────── */
 
 function IngredientProductPopup({ ingredient, onClose }: { ingredient: Ingredient; onClose: () => void }) {
-  const products: MealIngredientProduct[] = [];
-  if (ingredient.primaryProduct) products.push(ingredient.primaryProduct);
-  for (const opt of ingredient.productOptions ?? []) {
-    if (!products.some(p => p.id === opt.id)) products.push(opt);
-  }
+  const [products, setProducts] = useState<MealIngredientProduct[]>(() => {
+    const initial: MealIngredientProduct[] = [];
+    if (ingredient.primaryProduct) initial.push(ingredient.primaryProduct);
+    for (const opt of ingredient.productOptions ?? []) {
+      if (!initial.some(p => p.id === opt.id)) initial.push(opt);
+    }
+    return initial;
+  });
+  const [loadingProducts, setLoadingProducts] = useState(false);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadIngredientProducts() {
+      setLoadingProducts(true);
+      try {
+        const resolved = await resolvePreferredProductsForIngredientNames([ingredient.name]);
+        if (!active) return;
+        const entry = resolved.get(ingredient.name.trim().toLowerCase());
+        if (!entry) return;
+        const mapped: MealIngredientProduct[] = [entry.product, ...entry.alternatives]
+          .filter(Boolean)
+          .map(p => ({
+            id: p!.storeProductId,
+            name: p!.name,
+            brand: p!.brand ?? undefined,
+            sizeLabel: p!.sizeLabel ?? undefined,
+            store: p!.store,
+            productUrl: p!.productUrl ?? "",
+          }));
+        if (mapped.length > 0) setProducts(mapped);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (active) setLoadingProducts(false);
+      }
+    }
+    loadIngredientProducts();
+    return () => { active = false; };
+  }, [ingredient.name]);
 
   return (
     <div
@@ -536,6 +570,11 @@ function IngredientProductPopup({ ingredient, onClose }: { ingredient: Ingredien
           <button className="btn-app-ghost" style={{ padding: "0.25rem 0.5rem" }} onClick={onClose} aria-label="Close">✕</button>
         </div>
         <ul style={{ listStyle: "none", padding: "0 1.25rem 1.25rem", margin: 0 }}>
+          {loadingProducts && (
+            <li style={{ padding: "0.75rem 0", color: "var(--text-muted)", fontSize: "0.8rem" }}>
+              Loading products…
+            </li>
+          )}
           {products.map(product => (
             <li key={product.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.75rem 0", borderBottom: "1px solid var(--app-border)" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
@@ -547,11 +586,20 @@ function IngredientProductPopup({ ingredient, onClose }: { ingredient: Ingredien
                 )}
                 <span style={{ fontSize: "0.7rem", color: "var(--text-subtle)" }}>{product.store}</span>
               </div>
-              <a href={product.productUrl} target="_blank" rel="noopener noreferrer" className="btn-app-primary">
-                Open ↗
-              </a>
+              {product.productUrl ? (
+                <a href={product.productUrl} target="_blank" rel="noopener noreferrer" className="btn-app-primary">
+                  Open ↗
+                </a>
+              ) : (
+                <span style={{ fontSize: "0.75rem", color: "var(--text-subtle)" }}>No link</span>
+              )}
             </li>
           ))}
+          {!loadingProducts && products.length === 0 && (
+            <li style={{ padding: "0.75rem 0", color: "var(--text-muted)", fontSize: "0.8rem" }}>
+              No products available for this ingredient.
+            </li>
+          )}
         </ul>
       </div>
     </div>

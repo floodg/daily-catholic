@@ -151,6 +151,8 @@ export async function updateShoppingTripItem(
     quantityPurchased?: number;
     packQuantity?: number | null;
     packUnit?: string | null;
+    storeProductId?: string | null;
+    ingredientName?: string | null;
   }
 ): Promise<ShoppingTripItem> {
   const updates: Record<string, unknown> = {};
@@ -158,6 +160,8 @@ export async function updateShoppingTripItem(
   if (params.quantityPurchased !== undefined) updates.quantity_purchased = params.quantityPurchased;
   if ('packQuantity' in params) updates.pack_quantity = params.packQuantity ?? null;
   if ('packUnit' in params) updates.pack_unit = params.packUnit ?? null;
+  if ('storeProductId' in params) updates.store_product_id = params.storeProductId ?? null;
+  if ('ingredientName' in params) updates.ingredient_name = params.ingredientName ?? null;
 
   const { data, error } = await supabase
     .from('shopping_trip_items')

@@ -131,6 +131,75 @@ export async function addStockByPacks(ingredientName: string, packs: number): Pr
   });
 }
 
+export async function addStockByIngredientProduct(
+  ingredientName: string,
+  storeProductId: string,
+  packs: number
+): Promise<void> {
+  if (!(packs > 0)) throw new Error('Pack count must be greater than zero.');
+  const userId = await getCurrentUserId();
+  await ensureIngredientExists(ingredientName);
+
+  const { data: product, error } = await supabase
+    .from('store_products')
+    .select('id, size_value, size_unit_code, pack_size_g, pack_size_ml, pack_size_units')
+    .eq('id', storeProductId)
+    .maybeSingle();
+  if (error || !product) throw new Error('Selected product is unavailable.');
+
+  let unit: MeasurementUnitCode | null = null;
+  let unitQty = 0;
+
+  const sizeValue = Number((product as any).size_value ?? 0);
+  const sizeUnitCode = ((product as any).size_unit_code ?? '').toLowerCase();
+  if (sizeValue > 0 && sizeUnitCode) {
+    if (sizeUnitCode === 'kg') {
+      unit = 'g';
+      unitQty = sizeValue * 1000;
+    } else if (sizeUnitCode === 'g') {
+      unit = 'g';
+      unitQty = sizeValue;
+    } else if (sizeUnitCode === 'l') {
+      unit = 'ml';
+      unitQty = sizeValue * 1000;
+    } else if (sizeUnitCode === 'ml') {
+      unit = 'ml';
+      unitQty = sizeValue;
+    } else if (sizeUnitCode === 'units') {
+      unit = 'units';
+      unitQty = sizeValue;
+    }
+  }
+
+  if (!unit || !(unitQty > 0)) {
+    const packG = Number((product as any).pack_size_g ?? 0);
+    const packMl = Number((product as any).pack_size_ml ?? 0);
+    const packUnits = Number((product as any).pack_size_units ?? 0);
+    if (packG > 0) {
+      unit = 'g';
+      unitQty = packG;
+    } else if (packMl > 0) {
+      unit = 'ml';
+      unitQty = packMl;
+    } else if (packUnits > 0) {
+      unit = 'units';
+      unitQty = packUnits;
+    }
+  }
+
+  if (!unit || !(unitQty > 0)) {
+    throw new Error('Selected product has no usable pack size.');
+  }
+
+  await createInventoryTransaction({
+    userId,
+    ingredientName: ingredientName.trim(),
+    quantityDelta: packs * unitQty,
+    unit,
+    transactionType: 'purchase',
+  });
+}
+
 /**
  * Add stock directly with a numeric quantity (no linked product).
  */

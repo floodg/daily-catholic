@@ -14,6 +14,7 @@ import {
 import { getMealsForUser } from '../meals/api';
 import { getStoreProducts } from '../store-products/api';
 import { normalizeUnit, parseQuantity } from '../shopping/quantityUtils';
+import { resolvePreferredProductsForIngredientNames } from '../ingredients/api';
 import Combobox from '../../components/ui/Combobox';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -552,9 +553,22 @@ function TripCard({ trip, onUpdate, onDelete, storeProducts, meals, productAlter
     setAddingFromMeal(true);
     setAddFromMealError('');
     try {
+      const preferenceMap = await resolvePreferredProductsForIngredientNames(
+        meal.ingredients.map(ing => ing.name)
+      );
       const newItems = await Promise.all(
         meal.ingredients.map(ing => {
-          const product = ing.primaryProduct;
+          const preferred = preferenceMap.get(ing.name.toLowerCase());
+          const product = preferred?.product
+            ? {
+                id: preferred.product.storeProductId,
+                name: preferred.product.name,
+                brand: preferred.product.brand ?? undefined,
+                sizeLabel: preferred.product.sizeLabel ?? undefined,
+                store: preferred.product.store,
+                productUrl: preferred.product.productUrl ?? '',
+              }
+            : ing.primaryProduct;
           let productName: string;
           let packQuantity: number | undefined;
           let packUnit: string | undefined;
