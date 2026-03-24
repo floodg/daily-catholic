@@ -103,6 +103,10 @@ export interface PlannedWorkout {
   workoutId: string;
   time?: string;
   notes?: string;
+  /** Plan status tracking for workouts */
+  status?: WorkoutStatus;
+  /** Optional per-exercise progression log captured when completing the workout */
+  progress?: WorkoutProgress;
 }
 
 export interface ShoppingItem {
@@ -144,6 +148,30 @@ export interface Program {
   category?: string;
   content?: ProgramContent;
   createdAt: string;
+}
+
+// ─── Workouts progression & status ─────────────────────────────────────────────
+
+export type WorkoutStatus = "planned" | "completed" | "skipped";
+
+export interface WorkoutProgressEntry {
+  /** Reference to the exercise in the workout definition */
+  exerciseId: string;
+  /** Number of sets completed (optional summary, not per-set granularity) */
+  setsCompleted?: number;
+  /** Heaviest/top set reps achieved (optional quick log) */
+  topSetReps?: number;
+  /** Heaviest/top set load achieved, free text for flexibility (e.g. "22.5kg x 2") */
+  topSetWeight?: string;
+  /** Freeform note for this exercise entry */
+  notes?: string;
+}
+
+export interface WorkoutProgress {
+  plannedWorkoutId: string;
+  /** ISO timestamp of when this log was saved */
+  performedAt: string;
+  entries: WorkoutProgressEntry[];
 }
 
 export interface UserProgram {

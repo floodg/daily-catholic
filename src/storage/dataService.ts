@@ -1,6 +1,16 @@
-import type { Meal, PlannedMeal, Workout, PlannedWorkout, ShoppingItem } from "../domain/types";
+import type {
+  Meal,
+  PlannedMeal,
+  Workout,
+  PlannedWorkout,
+  ShoppingItem,
+  WorkoutProgress,
+  WorkoutStatus,
+} from "../domain/types";
 import { load, save, STORAGE_KEYS, isInitialized, markInitialized } from "./storage";
 import { getSeedMeals, getSeedWorkouts } from "./seedData";
+import { v4 as uuidv4 } from "./uuid";
+import { formatDateLocal, getMondayLocal } from "../lib/dateUtils";
 
 /**
  * Initialize storage with seed data if empty
@@ -20,6 +30,7 @@ export function initializeStorage(): void {
     // Initialize empty arrays for planned items
     save(STORAGE_KEYS.plannedMeals, []);
     save(STORAGE_KEYS.plannedWorkouts, []);
+    save(STORAGE_KEYS.walkingCompletions, {});
     save(STORAGE_KEYS.shoppingManualItems, []);
     
     markInitialized();
@@ -138,6 +149,85 @@ export function deletePlannedWorkout(id: string): void {
 
 export function getPlannedWorkoutsForDate(date: string): PlannedWorkout[] {
   return getPlannedWorkouts().filter(pw => pw.date === date);
+}
+
+// ─── Workouts: status & progression ────────────────────────────────────────────
+
+export function updatePlannedWorkoutStatus(id: string, status: WorkoutStatus): void {
+  const planned = getPlannedWorkouts();
+  const idx = planned.findIndex(p => p.id === id);
+  if (idx !== -1) {
+    planned[idx] = { ...planned[idx], status };
+    savePlannedWorkouts(planned);
+  }
+}
+
+export function saveWorkoutProgress(progress: WorkoutProgress): void {
+  const planned = getPlannedWorkouts();
+  const idx = planned.findIndex(p => p.id === progress.plannedWorkoutId);
+  if (idx !== -1) {
+    planned[idx] = { ...planned[idx], status: "completed", progress };
+    savePlannedWorkouts(planned);
+  }
+}
+
+// ─── Workouts: rotation seeding (A/B weekly, 3 sessions) ──────────────────────
+/**
+ * Seed a 4-week rotation starting current Monday:
+ * Mon: Workout A, Wed: Workout B, Fri: Workout A
+ * Alternate A/B each week (so week2 starts with B).
+ */
+export function seedWorkoutRotationIfEmpty(): void {
+  const planned = getPlannedWorkouts();
+  if (planned.length > 0) return;
+
+  const workouts = getWorkouts();
+  const workoutA = workouts.find(w => /workout a/i.test(w.name)) || workouts[0];
+  const workoutB = workouts.find(w => /workout b/i.test(w.name)) || workouts[1] || workouts[0];
+  if (!workoutA) return;
+
+  const monday = getMondayLocal(new Date());
+  const WEEKS = 4;
+  const toInsert: PlannedWorkout[] = [];
+
+  for (let week = 0; week < WEEKS; week++) {
+    const start = new Date(monday);
+    start.setDate(start.getDate() + week * 7);
+    const mon = new Date(start);
+    const wed = new Date(start); wed.setDate(start.getDate() + 2);
+    const fri = new Date(start); fri.setDate(start.getDate() + 4);
+
+    const isEvenWeek = week % 2 === 0; // week0 even
+    const first = isEvenWeek ? workoutA : workoutB;
+    const second = isEvenWeek ? workoutB : workoutA;
+    const third = isEvenWeek ? workoutA : workoutB;
+
+    const make = (date: Date, workoutId: string): PlannedWorkout => ({
+      id: uuidv4(),
+      date: formatDateLocal(date),
+      workoutId,
+      time: "18:00",
+      status: "planned",
+    });
+
+    toInsert.push(make(mon, first.id), make(wed, second.id), make(fri, third.id));
+  }
+
+  savePlannedWorkouts([...planned, ...toInsert]);
+}
+
+// ─── Walking daily checklist ───────────────────────────────────────────────────
+/**
+ * Track daily walking completion by local date string -> boolean.
+ */
+export function getWalkingCompletions(): Record<string, boolean> {
+  return load<Record<string, boolean>>(STORAGE_KEYS.walkingCompletions, {});
+}
+
+export function toggleWalkingComplete(date: string): void {
+  const map = getWalkingCompletions();
+  map[date] = !map[date];
+  save(STORAGE_KEYS.walkingCompletions, map);
 }
 
 // Shopping Manual Items
