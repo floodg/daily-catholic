@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { PlannedMeal, Meal, MealStatus } from "../domain/types";
+import type { PlannedMeal, Meal, MealStatus, PlannedWorkout } from "../domain/types";
 import { getPlannedMeals } from "./planner/api";
 import { getMealsForUser } from "./meals/api";
 import { supabase } from "../lib/supabase";
 import { formatDateLocal } from "../lib/dateUtils";
 import { changePlannedMealStatusWithInventory } from "./mealCompletion";
+import { getPlannedWorkouts, updatePlannedWorkoutStatus, getWalkingCompletions, toggleWalkingComplete } from "../storage/dataService";
 
 type TodaysMeal = PlannedMeal & { meal?: Meal };
 
@@ -21,6 +22,8 @@ export default function Dashboard() {
   const [mealsLoading, setMealsLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [todaysWorkouts, setTodaysWorkouts] = useState<PlannedWorkout[]>([]);
+  const [walkingDone, setWalkingDone] = useState<boolean>(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -46,6 +49,16 @@ export default function Dashboard() {
       })
       .catch(console.error)
       .finally(() => setMealsLoading(false));
+
+    // Load today's workouts and walking completion
+    try {
+      const allPlanned = getPlannedWorkouts();
+      setTodaysWorkouts(allPlanned.filter(w => w.date === today));
+      const walking = getWalkingCompletions();
+      setWalkingDone(Boolean(walking[today]));
+    } catch (e) {
+      console.error(e);
+    }
   }, []);
 
   const formatMealTime = (time: string) => {
@@ -166,6 +179,64 @@ export default function Dashboard() {
             </div>
           )}
           <Link to="/app/plan" className="btn-app-ghost" style={{ display: 'inline-flex', marginTop: '0.75rem', padding: '0.5rem 1rem' }}>View Weekly Plan →</Link>
+        </section>
+
+        {/* Workouts & Walking checklist */}
+        <section className="app-card">
+          <div className="app-card-header"><span className="app-card-title">💪 Workouts</span></div>
+          <div className="app-card-body">
+            {todaysWorkouts.length === 0 ? (
+              <p style={{ margin: 0, fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem', color: 'var(--text-subtle)' }}>
+                No workout scheduled. Plan one on the <Link to="/app/workouts" style={{ color: 'var(--gold)', fontWeight: 600, textDecoration: 'none' }}>Workouts</Link> page.
+              </p>
+            ) : (
+              todaysWorkouts.map(w => (
+                <div key={w.id} className="app-card" style={{ marginBottom: '0.75rem', padding: '0.875rem 1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--parchment)' }}>{w.time ? `${w.time} · ` : ''}Workout</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        {/* We don't have direct workout name here; link to page */}
+                        <Link to="/app/workouts" style={{ color: 'var(--gold)', textDecoration: 'none' }}>View details</Link>
+                      </div>
+                    </div>
+                    <div>
+                      {w.status === 'completed' ? (
+                        <span className="status-pill completed">✓ Done</span>
+                      ) : w.status === 'skipped' ? (
+                        <span className="status-pill skipped">Skipped</span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button className="btn-app-primary" onClick={() => { updatePlannedWorkoutStatus(w.id, 'completed'); setTodaysWorkouts(prev => prev.map(x => x.id === w.id ? { ...x, status: 'completed' } : x)); }}>Mark done</button>
+                          <button className="btn-app-secondary" onClick={() => { updatePlannedWorkoutStatus(w.id, 'skipped'); setTodaysWorkouts(prev => prev.map(x => x.id === w.id ? { ...x, status: 'skipped' } : x)); }}>Skip</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+            <div className="app-card" style={{ padding: '0.875rem 1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    id="walk-check"
+                    type="checkbox"
+                    checked={walkingDone}
+                    onChange={() => {
+                      const today = formatDateLocal(new Date());
+                      toggleWalkingComplete(today);
+                      setWalkingDone(prev => !prev);
+                    }}
+                  />
+                  <label htmlFor="walk-check" style={{ cursor: 'pointer' }}>
+                    🚶 40 min walk (7–10k steps)
+                  </label>
+                </div>
+                <Link to="/app/workouts" className="btn-app-ghost">Plan workouts</Link>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
 

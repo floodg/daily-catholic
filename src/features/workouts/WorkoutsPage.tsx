@@ -1,15 +1,20 @@
-import { useEffect, useState } from "react";
-import type { Workout, PlannedWorkout } from "../../domain/types";
-import { 
-  getWorkouts, 
-  addWorkout, 
-  updateWorkout, 
+import { useEffect, useMemo, useState } from "react";
+import type { Workout, PlannedWorkout, WorkoutProgressEntry } from "../../domain/types";
+import {
+  getWorkouts,
+  addWorkout,
+  updateWorkout,
   deleteWorkout,
   getPlannedWorkouts,
   addPlannedWorkout,
-  deletePlannedWorkout 
+  deletePlannedWorkout,
+  updatePlannedWorkoutStatus,
+  saveWorkoutProgress,
+  seedWorkoutRotationIfEmpty,
 } from "../../storage/dataService";
 import { v4 as uuidv4 } from "../../storage/uuid";
+import { formatDateLocal, getMondayLocal } from "../../lib/dateUtils";
+import { ChevronLeft, ChevronRight, Plus, Check } from "lucide-react";
 
 export default function WorkoutsPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -17,10 +22,29 @@ export default function WorkoutsPage() {
   const [selectedWorkout, setSelectedWorkout] = useState<Workout | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showQuickScheduleModal, setShowQuickScheduleModal] = useState(false);
+  const [quickScheduleDate, setQuickScheduleDate] = useState<string>("");
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [logPlannedId, setLogPlannedId] = useState<string | null>(null);
+  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(getMondayLocal(new Date()));
+  const todayStr = formatDateLocal(new Date());
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 960);
+  const [mobileDayOffset, setMobileDayOffset] = useState(() => {
+    if (window.innerWidth >= 960) return 0;
+    const diff = Math.floor((new Date().getTime() - getMondayLocal(new Date()).getTime()) / 86400000);
+    return Math.max(0, Math.min(diff, 4));
+  });
 
   useEffect(() => {
-    setWorkouts(getWorkouts());
-    setPlannedWorkouts(getPlannedWorkouts());
+    const handler = () => setIsMobile(window.innerWidth < 960);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  useEffect(() => {
+    // Ensure initial rotation exists if user has no planned workouts
+    seedWorkoutRotationIfEmpty();
+    loadData();
   }, []);
 
   const loadData = () => {
@@ -33,6 +57,37 @@ export default function WorkoutsPage() {
       const next = list.find((w) => w.id === currentId);
       if (next) setSelectedWorkout(next);
     }
+  };
+
+  // ── Weekly calendar helpers ────────────────────────────────────────────────────
+  function addDays(date: Date, days: number): Date {
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    return d;
+  }
+
+  const weekDates: Date[] = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i)),
+    [currentWeekStart]
+  );
+
+  // Reset mobile offset to today (or 0) when the visible week changes
+  useEffect(() => {
+    if (!isMobile) return;
+    const todayIdx = weekDates.findIndex(d => formatDateLocal(d) === todayStr);
+    setMobileDayOffset(todayIdx !== -1 ? Math.min(todayIdx, 4) : 0);
+  }, [currentWeekStart, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const visibleDates = isMobile ? weekDates.slice(mobileDayOffset, mobileDayOffset + 3) : weekDates;
+
+  const getPlannedForDate = (date: Date): PlannedWorkout | undefined => {
+    const dateStr = formatDateLocal(date);
+    return plannedWorkouts.find(pw => pw.date === dateStr);
+  };
+
+  const getWorkoutName = (id: string): string => {
+    return workouts.find(w => w.id === id)?.name ?? "Unknown workout";
   };
 
   const handleAddNew = () => {
@@ -102,6 +157,7 @@ export default function WorkoutsPage() {
       date,
       workoutId: selectedWorkout.id,
       time: time || undefined,
+      status: "planned",
     };
     addPlannedWorkout(plannedWorkout);
     loadData();
@@ -122,13 +178,291 @@ export default function WorkoutsPage() {
     }).sort((a, b) => a.date.localeCompare(b.date));
   };
 
+  // ── Calendar actions ───────────────────────────────────────────────────────────
+  const handleAddOnDate = (date: Date) => {
+    setQuickScheduleDate(formatDateLocal(date));
+    setShowQuickScheduleModal(true);
+  };
+
+  const handleStatusChange = (pw: PlannedWorkout, status: "completed" | "skipped" | "planned") => {
+    updatePlannedWorkoutStatus(pw.id, status);
+    loadData();
+  };
+
+  const openLogFor = (pw: PlannedWorkout) => {
+    setLogPlannedId(pw.id);
+    setShowLogModal(true);
+  };
+
+  const currentWeekLabel = isMobile
+    ? `${visibleDates[0]?.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })} → ${visibleDates[visibleDates.length - 1]?.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })}`
+    : `${weekDates[0].toLocaleDateString("en-AU", { day: "numeric", month: "short" })} → ${weekDates[6].toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
+
+  const handlePrev = () => {
+    if (isMobile) {
+      if (mobileDayOffset > 0) { setMobileDayOffset(o => o - 1); }
+      else { setCurrentWeekStart(d => addDays(d, -7)); setMobileDayOffset(4); }
+    } else {
+      setCurrentWeekStart(d => addDays(d, -7));
+    }
+  };
+
+  const handleNext = () => {
+    if (isMobile) {
+      if (mobileDayOffset < 4) { setMobileDayOffset(o => o + 1); }
+      else { setCurrentWeekStart(d => addDays(d, 7)); setMobileDayOffset(0); }
+    } else {
+      setCurrentWeekStart(d => addDays(d, 7));
+    }
+  };
+
+  const handleToday = () => {
+    setCurrentWeekStart(getMondayLocal(new Date()));
+    if (isMobile) {
+      const diff = Math.floor((new Date().getTime() - getMondayLocal(new Date()).getTime()) / 86400000);
+      setMobileDayOffset(Math.max(0, Math.min(diff, 4)));
+    }
+  };
+
   return (
     <div className="workouts-page">
       <div className="page-header-bar">
         <h1 className="page-title">💪 Workouts</h1>
-        <button className="btn-app-primary" onClick={handleAddNew}>
-          + Add New Workout
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <button className="btn-app-secondary" onClick={handleAddNew}>+ Add New Workout</button>
+        </div>
+      </div>
+
+      {/* Weekly calendar */}
+      <div className="app-card" style={{ marginBottom: "1.25rem", padding: "1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+          <div>
+            <p className="page-eyebrow">Weekly Training</p>
+            <div style={{ fontFamily: "DM Sans, sans-serif", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              {currentWeekLabel}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button className="btn-app-ghost" onClick={handlePrev} title="Previous">
+              <ChevronLeft size={18} />
+            </button>
+            <button className="btn-app-secondary" onClick={handleToday} style={{ fontSize: "0.8rem", padding: "0.375rem 0.875rem" }}>
+              Today
+            </button>
+            <button className="btn-app-ghost" onClick={handleNext} title="Next">
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div style={{ borderRadius: 16, boxShadow: "var(--card-shadow)" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile
+              ? `80px repeat(3, 1fr)`
+              : `120px repeat(7, minmax(130px, 1fr))`,
+            background: "var(--app-surface)",
+            border: "1px solid var(--app-border)",
+            borderRadius: 16,
+            overflow: "hidden",
+          }}>
+            {/* Corner label */}
+            <div style={{
+              background: "#0d1117",
+              padding: "0.875rem 0.5rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}>
+              <span style={{
+                fontSize: "0.6rem",
+                color: "rgba(255,255,255,0.3)",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fontFamily: "DM Sans, sans-serif",
+              }}>
+                Session
+              </span>
+            </div>
+
+            {/* Day headers */}
+            {visibleDates.map((date, i) => {
+              const actualIdx = isMobile ? mobileDayOffset + i : i;
+              const ds = formatDateLocal(date);
+              const isToday = ds === todayStr;
+              return (
+                <div key={i} style={{
+                  background: isToday ? "rgba(201,168,76,0.12)" : "#0d1117",
+                  padding: "0.625rem 0.5rem",
+                  textAlign: "center",
+                  borderLeft: "1px solid rgba(255,255,255,0.07)",
+                }}>
+                  <div style={{
+                    fontFamily: "DM Sans, sans-serif",
+                    fontWeight: 700,
+                    fontSize: "0.65rem",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    color: isToday ? "#c9a84c" : "rgba(232,224,208,0.45)",
+                    marginBottom: "0.125rem",
+                  }}>
+                    {DAYS[actualIdx]}
+                  </div>
+                  <div style={{
+                    fontSize: "0.75rem",
+                    color: isToday ? "#c9a84c" : "rgba(232,224,208,0.8)",
+                    fontFamily: "DM Sans, sans-serif",
+                    fontWeight: 500,
+                  }}>
+                    {date.getDate()}/{date.getMonth() + 1}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Single row for workout session */}
+            <>
+              {/* Row label */}
+              <div style={{
+                padding: "0.75rem 0.5rem",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                borderTop: "1px solid var(--app-border)",
+                background: "var(--app-bg)",
+                gap: "0.2rem",
+              }}>
+                <span style={{ fontSize: "1rem" }}>🏋️</span>
+                <span style={{
+                  fontSize: "0.55rem",
+                  fontFamily: "DM Sans, sans-serif",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "var(--text-subtle)",
+                }}>
+                  Workout
+                </span>
+              </div>
+
+              {/* Day cells */}
+              {visibleDates.map((date, dayIdx) => {
+                const ds = formatDateLocal(date);
+                const isToday = ds === todayStr;
+                const pw = getPlannedForDate(date);
+                const status = pw?.status ?? "planned";
+                return (
+                  <div key={`${dayIdx}-workout`} style={{
+                    padding: "0.375rem",
+                    borderTop: "1px solid var(--app-border)",
+                    borderLeft: "1px solid var(--app-border)",
+                    background: isToday ? "rgba(185,90,16,0.04)" : "transparent",
+                    minHeight: 90,
+                    display: "flex",
+                    alignItems: "stretch",
+                  }}>
+                    {pw ? (
+                      <div style={{
+                        width: "100%",
+                        borderRadius: 10,
+                        padding: "0.5rem",
+                        position: "relative",
+                        background:
+                          status === "completed" ? "rgba(138,180,160,0.08)" :
+                          status === "skipped" ? "rgba(255,255,255,0.03)" :
+                          "rgba(168,196,224,0.06)",
+                        border: `1px solid ${
+                          status === "completed" ? "rgba(138,180,160,0.25)" :
+                          status === "skipped" ? "rgba(255,255,255,0.07)" :
+                          "rgba(168,196,224,0.2)"}`
+                      }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteScheduled(pw.id); }}
+                          className="plan-remove-btn"
+                          title="Remove"
+                          aria-label="Remove workout"
+                        >
+                          ✕
+                        </button>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem" }}>
+                          <div>
+                            <div style={{ fontSize: "0.8rem", fontFamily: "DM Sans, sans-serif", fontWeight: 600, color: status === "completed" ? "#8ab4a0" : "var(--parchment)", lineHeight: 1.2 }}>
+                              {getWorkoutName(pw.workoutId)}
+                            </div>
+                            {pw.time && (
+                              <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>
+                                {pw.time}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ flexShrink: 0 }}>
+                            {status === "completed" && <span className="status-pill completed">✓ Done</span>}
+                            {status === "skipped" && <span className="status-pill skipped">Skipped</span>}
+                          </div>
+                        </div>
+                        {status === "planned" && (
+                          <div style={{ display: "flex", gap: "0.25rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+                            <button
+                              className="btn-app-primary"
+                              style={{ fontSize: "0.65rem", padding: "0.3rem 0.6rem" }}
+                              onClick={() => handleStatusChange(pw, "completed")}
+                              title="Mark completed"
+                            >
+                              <Check size={11} /> Done
+                            </button>
+                            <button
+                              className="btn-app-secondary"
+                              style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }}
+                              onClick={() => handleStatusChange(pw, "skipped")}
+                            >
+                              Skip
+                            </button>
+                            <button
+                              className="btn-app-ghost"
+                              style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }}
+                              onClick={() => openLogFor(pw)}
+                            >
+                              Log
+                            </button>
+                          </div>
+                        )}
+                        {status === "completed" && (
+                          <div style={{ display: "flex", gap: "0.25rem", marginTop: "0.5rem" }}>
+                            <button className="btn-app-ghost" style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }} onClick={() => openLogFor(pw)}>Edit log</button>
+                            <button className="btn-app-secondary" style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }} onClick={() => handleStatusChange(pw, "planned")}>Undo</button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleAddOnDate(date)}
+                        className="plan-add-btn"
+                        style={{
+                          width: "100%",
+                          minHeight: 70,
+                          background: "transparent",
+                          border: "1.5px dashed var(--app-border)",
+                          color: "var(--text-subtle)",
+                          borderRadius: 10,
+                          cursor: "pointer",
+                          fontSize: "1.125rem",
+                          transition: "all 0.15s",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                        title={`Add workout`}
+                      >
+                        <Plus size={16} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          </div>
+        </div>
       </div>
 
       <div className="workouts-layout">
@@ -217,6 +551,47 @@ export default function WorkoutsPage() {
           onCancel={() => setShowScheduleModal(false)}
         />
       )}
+
+      {showQuickScheduleModal && (
+        <QuickScheduleModal
+          workouts={workouts}
+          date={quickScheduleDate}
+          onSave={(workoutId: string, time: string) => {
+            const planned: PlannedWorkout = {
+              id: uuidv4(),
+              date: quickScheduleDate,
+              workoutId,
+              time: time || undefined,
+              status: "planned",
+            };
+            addPlannedWorkout(planned);
+            setShowQuickScheduleModal(false);
+            loadData();
+          }}
+          onCancel={() => setShowQuickScheduleModal(false)}
+        />
+      )}
+
+      {showLogModal && logPlannedId && (() => {
+        const pw = plannedWorkouts.find(p => p.id === logPlannedId);
+        const workout = workouts.find(w => w.id === pw?.workoutId);
+        if (!pw || !workout) return null;
+        return (
+          <LogProgressModal
+            workout={workout}
+            onSave={(entries) => {
+              saveWorkoutProgress({
+                plannedWorkoutId: pw.id,
+                performedAt: new Date().toISOString(),
+                entries,
+              });
+              setShowLogModal(false);
+              loadData();
+            }}
+            onCancel={() => setShowLogModal(false)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -427,6 +802,137 @@ function ScheduleModal({ workoutName, onSave, onCancel }: ScheduleModalProps) {
         </div>
         <div className="modal-actions">
           <button className="btn-app-primary" onClick={handleSave}>Schedule</button>
+          <button className="btn-app-secondary" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Quick schedule modal (pick workout + time) ───────────────────────────────────
+interface QuickScheduleModalProps {
+  workouts: Workout[];
+  date: string;
+  onSave: (workoutId: string, time: string) => void;
+  onCancel: () => void;
+}
+
+function QuickScheduleModal({ workouts, date, onSave, onCancel }: QuickScheduleModalProps) {
+  const [selectedWorkoutId, setSelectedWorkoutId] = useState<string>(workouts[0]?.id ?? "");
+  const [time, setTime] = useState("18:00");
+
+  const handleSave = () => {
+    if (!selectedWorkoutId) {
+      alert("Please choose a workout");
+      return;
+    }
+    onSave(selectedWorkoutId, time);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <h2>Schedule for {date}</h2>
+        <div className="form-group">
+          <label className="app-label">Workout</label>
+          <select className="app-input" value={selectedWorkoutId} onChange={e => setSelectedWorkoutId(e.target.value)}>
+            {workouts.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="app-label">Time (optional)</label>
+          <input type="time" className="app-input" value={time} onChange={e => setTime(e.target.value)} />
+        </div>
+        <div className="modal-actions">
+          <button className="btn-app-primary" onClick={handleSave}>Save</button>
+          <button className="btn-app-secondary" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Log progress modal ───────────────────────────────────────────────────────────
+interface LogProgressModalProps {
+  workout: Workout;
+  onSave: (entries: WorkoutProgressEntry[]) => void;
+  onCancel: () => void;
+}
+
+function LogProgressModal({ workout, onSave, onCancel }: LogProgressModalProps) {
+  const [entries, setEntries] = useState<WorkoutProgressEntry[]>(
+    workout.exercises.map(ex => ({
+      exerciseId: ex.id,
+      setsCompleted: ex.sets,
+      topSetReps: ex.reps ? parseInt(String(ex.reps).split("-").pop() || "0", 10) || undefined : undefined,
+      topSetWeight: "",
+      notes: "",
+    }))
+  );
+
+  const updateEntry = (idx: number, patch: Partial<WorkoutProgressEntry>) => {
+    const next = [...entries];
+    next[idx] = { ...next[idx], ...patch };
+    setEntries(next);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <h2>Log Progress</h2>
+        <p style={{ marginTop: 0, color: "var(--text-muted)" }}><strong>{workout.name}</strong></p>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxHeight: "60vh", overflow: "auto", paddingRight: "0.25rem" }}>
+          {workout.exercises.map((ex, i) => (
+            <div key={ex.id} className="app-card" style={{ padding: "0.75rem" }}>
+              <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>{ex.name}</div>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <div>
+                  <label className="app-label" style={{ fontSize: "0.7rem" }}>Sets</label>
+                  <input
+                    type="number"
+                    className="app-input"
+                    style={{ width: 90 }}
+                    value={entries[i].setsCompleted ?? ""}
+                    onChange={e => updateEntry(i, { setsCompleted: e.target.value ? parseInt(e.target.value) : undefined })}
+                  />
+                </div>
+                <div>
+                  <label className="app-label" style={{ fontSize: "0.7rem" }}>Top set reps</label>
+                  <input
+                    type="number"
+                    className="app-input"
+                    style={{ width: 120 }}
+                    value={entries[i].topSetReps ?? ""}
+                    onChange={e => updateEntry(i, { topSetReps: e.target.value ? parseInt(e.target.value) : undefined })}
+                  />
+                </div>
+                <div>
+                  <label className="app-label" style={{ fontSize: "0.7rem" }}>Top set weight</label>
+                  <input
+                    type="text"
+                    className="app-input"
+                    style={{ width: 140 }}
+                    placeholder="e.g. 22.5kg"
+                    value={entries[i].topSetWeight ?? ""}
+                    onChange={e => updateEntry(i, { topSetWeight: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div style={{ marginTop: "0.35rem" }}>
+                <label className="app-label" style={{ fontSize: "0.7rem" }}>Notes</label>
+                <input
+                  type="text"
+                  className="app-input"
+                  placeholder="Optional notes"
+                  value={entries[i].notes ?? ""}
+                  onChange={e => updateEntry(i, { notes: e.target.value })}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="btn-app-primary" onClick={() => onSave(entries)}>Save log</button>
           <button className="btn-app-secondary" onClick={onCancel}>Cancel</button>
         </div>
       </div>

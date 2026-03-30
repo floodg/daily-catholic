@@ -47,6 +47,18 @@ export default function PlanPage() {
   const [modalDayIdx, setModalDayIdx] = useState(0);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 960);
+  const [mobileDayOffset, setMobileDayOffset] = useState(() => {
+    if (window.innerWidth >= 960) return 0;
+    const diff = Math.floor((new Date().getTime() - getMondayLocal(new Date()).getTime()) / 86400000);
+    return Math.max(0, Math.min(diff, 4));
+  });
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 960);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   useEffect(() => { loadData(); }, []);
 
@@ -63,6 +75,41 @@ export default function PlanPage() {
 
   const weekDates: Date[] = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
   const todayStr = formatDateLocal(new Date());
+
+  // Reset mobile offset to today when week changes
+  useEffect(() => {
+    if (!isMobile) return;
+    const todayIdx = weekDates.findIndex(d => formatDateLocal(d) === todayStr);
+    setMobileDayOffset(todayIdx !== -1 ? Math.min(todayIdx, 4) : 0);
+  }, [currentWeekStart, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visibleDates = isMobile ? weekDates.slice(mobileDayOffset, mobileDayOffset + 3) : weekDates;
+
+  const handlePrev = () => {
+    if (isMobile) {
+      if (mobileDayOffset > 0) { setMobileDayOffset(o => o - 1); }
+      else { setCurrentWeekStart(d => addDays(d, -7)); setMobileDayOffset(4); }
+    } else {
+      setCurrentWeekStart(d => addDays(d, -7));
+    }
+  };
+
+  const handleNext = () => {
+    if (isMobile) {
+      if (mobileDayOffset < 4) { setMobileDayOffset(o => o + 1); }
+      else { setCurrentWeekStart(d => addDays(d, 7)); setMobileDayOffset(0); }
+    } else {
+      setCurrentWeekStart(d => addDays(d, 7));
+    }
+  };
+
+  const handleToday = () => {
+    setCurrentWeekStart(getMondayLocal(new Date()));
+    if (isMobile) {
+      const diff = Math.floor((new Date().getTime() - getMondayLocal(new Date()).getTime()) / 86400000);
+      setMobileDayOffset(Math.max(0, Math.min(diff, 4)));
+    }
+  };
 
   const getMealForSlot = (date: Date, time: MealTime): PlannedMeal | undefined => {
     const dateStr = formatDateLocal(date);
@@ -148,42 +195,37 @@ export default function PlanPage() {
           <h1 className="page-title">Weekly <em>Plan</em></h1>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <button
-            className="btn-app-ghost"
-            onClick={() => setCurrentWeekStart(d => addDays(d, -7))}
-          >
+          <button className="btn-app-ghost" onClick={handlePrev} title="Previous">
             <ChevronLeft size={18} />
           </button>
           <button
             className="btn-app-secondary"
-            onClick={() => setCurrentWeekStart(getMondayLocal(new Date()))}
+            onClick={handleToday}
             style={{ fontSize: "0.8rem", padding: "0.375rem 0.875rem" }}
           >
             Today
           </button>
-          <button
-            className="btn-app-ghost"
-            onClick={() => setCurrentWeekStart(d => addDays(d, 7))}
-          >
+          <button className="btn-app-ghost" onClick={handleNext} title="Next">
             <ChevronRight size={18} />
           </button>
         </div>
       </div>
 
       <p style={{ fontFamily: "DM Sans, sans-serif", fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "1.25rem" }}>
-        {formatHeaderDate(weekDates[0])} → {formatHeaderDate(weekDates[6])}
+        {isMobile
+          ? `${visibleDates[0]?.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })} → ${visibleDates[visibleDates.length - 1]?.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })}`
+          : `${formatHeaderDate(weekDates[0])} → ${formatHeaderDate(weekDates[6])}`}
       </p>
 
       {/* Grid */}
-      <div style={{ overflowX: "auto", borderRadius: 16, boxShadow: "var(--card-shadow)" }}>
+      <div style={{ borderRadius: 16, boxShadow: "var(--card-shadow)" }}>
         <div style={{
           display: "grid",
-          gridTemplateColumns: `80px repeat(7, minmax(130px, 1fr))`,
+          gridTemplateColumns: isMobile ? `80px repeat(3, 1fr)` : `80px repeat(7, minmax(130px, 1fr))`,
           background: "var(--app-surface)",
           border: "1px solid var(--app-border)",
           borderRadius: 16,
           overflow: "hidden",
-          minWidth: 760,
         }}>
           {/* Header row — top-left corner */}
           <div style={{
@@ -205,7 +247,8 @@ export default function PlanPage() {
           </div>
 
           {/* Header row — day columns */}
-          {weekDates.map((date, i) => {
+          {visibleDates.map((date, i) => {
+            const actualIdx = isMobile ? mobileDayOffset + i : i;
             const ds = formatDateLocal(date);
             const isToday = ds === todayStr;
             return (
@@ -224,7 +267,7 @@ export default function PlanPage() {
                   color: isToday ? "#c9a84c" : "rgba(232,224,208,0.45)",
                   marginBottom: "0.125rem",
                 }}>
-                  {DAYS[i]}
+                  {DAYS[actualIdx]}
                 </div>
                 <div style={{
                   fontSize: "0.75rem",
@@ -266,7 +309,8 @@ export default function PlanPage() {
               </div>
 
               {/* Day cells */}
-              {weekDates.map((date, dayIdx) => {
+              {visibleDates.map((date, i) => {
+                const dayIdx = isMobile ? mobileDayOffset + i : i;
                 const ds = formatDateLocal(date);
                 const isToday = ds === todayStr;
                 const pm = getMealForSlot(date, time);

@@ -8,6 +8,7 @@ export const STORAGE_KEYS = {
   plannedMeals: "jk_plannedMeals",
   workouts: "jk_workouts",
   plannedWorkouts: "jk_plannedWorkouts",
+  walkingCompletions: "jk_walkingCompletions",
   shoppingManualItems: "jk_shoppingManualItems",
 } as const;
 

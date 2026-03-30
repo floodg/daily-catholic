@@ -940,6 +940,286 @@ select.app-input:disabled {
   border-radius: 6px;
 }
 
+/* ── Workouts Page ──────────────────────────────────────────────────────── */
+.workouts-page {
+  width: 100%;
+}
+
+.workouts-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.workouts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.workouts-list h2 {
+  margin: 0 0 0.5rem;
+  font-family: "Cinzel", serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.workout-card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  padding: 0.875rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.workout-card:hover {
+  border-color: rgba(201,168,76,0.25);
+  box-shadow: var(--card-shadow-hover);
+}
+
+.workout-card.selected {
+  border-color: rgba(201,168,76,0.5);
+  background: rgba(201,168,76,0.05);
+  box-shadow: 0 0 0 2px rgba(201,168,76,0.12);
+}
+
+.workout-card h3 {
+  margin: 0 0 0.2rem;
+  font-family: "Cinzel", serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e8e0d0;
+  letter-spacing: 0.03em;
+}
+
+.workout-info {
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.schedule-btn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.scheduled-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--app-border);
+}
+
+.scheduled-card {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  margin-bottom: 0.375rem;
+}
+
+.scheduled-date {
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--gold);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.scheduled-name {
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.8rem;
+  color: #e8e0d0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.remove-btn:hover {
+  color: #f87171;
+  background: rgba(220,38,38,0.1);
+}
+
+/* Workout details panel */
+.workout-details {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  min-height: 280px;
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 180px;
+  color: var(--text-muted);
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+/* Workout view */
+.workout-view h2,
+.workout-form h2 {
+  margin: 0 0 1rem;
+  font-family: "Cinzel", serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #e8e0d0;
+  letter-spacing: 0.03em;
+}
+
+.view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.view-header h2 { margin: 0; }
+
+.view-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.view-section {
+  margin-top: 1rem;
+}
+
+.view-section h3 {
+  margin: 0 0 0.75rem;
+  font-family: "Cinzel", serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.exercise-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.875rem;
+}
+
+.exercise-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--app-border);
+  font-family: "Cinzel", serif;
+}
+
+.exercise-table td {
+  padding: 0.6rem 0.75rem;
+  color: #e8e0d0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.exercise-table tbody tr:hover td {
+  background: rgba(255,255,255,0.02);
+}
+
+/* Workout form */
+.workout-form .form-section { margin-top: 0.5rem; }
+
+.workout-form .section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.625rem;
+}
+
+.workout-form .section-header h3 {
+  margin: 0;
+  font-family: "Cinzel", serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.exercise-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.exercise-row .app-input {
+  min-width: 0;
+}
+
+/* Weekly calendar — add/remove buttons */
+.plan-add-btn:hover {
+  border-color: rgba(201,168,76,0.4) !important;
+  color: var(--gold) !important;
+  background: rgba(201,168,76,0.06) !important;
+}
+
+.plan-remove-btn {
+  position: absolute !important;
+  top: 4px;
+  right: 4px;
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer;
+  color: rgba(255,255,255,0.3) !important;
+  font-size: 0.65rem !important;
+  line-height: 1;
+  padding: 2px 4px !important;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  z-index: 1;
+}
+
+.plan-remove-btn:hover {
+  color: #f87171 !important;
+  background: rgba(220,38,38,0.15) !important;
+}
+
+@media (max-width: 1100px) {
+  .workouts-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .app-sidebar { transform: translateX(-100%); }
