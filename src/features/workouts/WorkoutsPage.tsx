@@ -28,15 +28,15 @@ export default function WorkoutsPage() {
   const [logPlannedId, setLogPlannedId] = useState<string | null>(null);
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(getMondayLocal(new Date()));
   const todayStr = formatDateLocal(new Date());
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 960);
   const [mobileDayOffset, setMobileDayOffset] = useState(() => {
-    if (window.innerWidth >= 640) return 0;
+    if (window.innerWidth >= 960) return 0;
     const diff = Math.floor((new Date().getTime() - getMondayLocal(new Date()).getTime()) / 86400000);
     return Math.max(0, Math.min(diff, 4));
   });
 
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 640);
+    const handler = () => setIsMobile(window.innerWidth < 960);
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, []);
