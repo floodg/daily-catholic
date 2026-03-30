@@ -28,6 +28,18 @@ export default function WorkoutsPage() {
   const [logPlannedId, setLogPlannedId] = useState<string | null>(null);
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(getMondayLocal(new Date()));
   const todayStr = formatDateLocal(new Date());
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+  const [mobileDayOffset, setMobileDayOffset] = useState(() => {
+    if (window.innerWidth >= 640) return 0;
+    const diff = Math.floor((new Date().getTime() - getMondayLocal(new Date()).getTime()) / 86400000);
+    return Math.max(0, Math.min(diff, 4));
+  });
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   useEffect(() => {
     // Ensure initial rotation exists if user has no planned workouts
@@ -58,6 +70,16 @@ export default function WorkoutsPage() {
     () => Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i)),
     [currentWeekStart]
   );
+
+  // Reset mobile offset to today (or 0) when the visible week changes
+  useEffect(() => {
+    if (!isMobile) return;
+    const todayIdx = weekDates.findIndex(d => formatDateLocal(d) === todayStr);
+    setMobileDayOffset(todayIdx !== -1 ? Math.min(todayIdx, 4) : 0);
+  }, [currentWeekStart, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const visibleDates = isMobile ? weekDates.slice(mobileDayOffset, mobileDayOffset + 3) : weekDates;
 
   const getPlannedForDate = (date: Date): PlannedWorkout | undefined => {
     const dateStr = formatDateLocal(date);
@@ -172,7 +194,35 @@ export default function WorkoutsPage() {
     setShowLogModal(true);
   };
 
-  const currentWeekLabel = `${weekDates[0].toLocaleDateString("en-AU", { day: "numeric", month: "short" })} → ${weekDates[6].toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
+  const currentWeekLabel = isMobile
+    ? `${visibleDates[0]?.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })} → ${visibleDates[visibleDates.length - 1]?.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })}`
+    : `${weekDates[0].toLocaleDateString("en-AU", { day: "numeric", month: "short" })} → ${weekDates[6].toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
+
+  const handlePrev = () => {
+    if (isMobile) {
+      if (mobileDayOffset > 0) { setMobileDayOffset(o => o - 1); }
+      else { setCurrentWeekStart(d => addDays(d, -7)); setMobileDayOffset(4); }
+    } else {
+      setCurrentWeekStart(d => addDays(d, -7));
+    }
+  };
+
+  const handleNext = () => {
+    if (isMobile) {
+      if (mobileDayOffset < 4) { setMobileDayOffset(o => o + 1); }
+      else { setCurrentWeekStart(d => addDays(d, 7)); setMobileDayOffset(0); }
+    } else {
+      setCurrentWeekStart(d => addDays(d, 7));
+    }
+  };
+
+  const handleToday = () => {
+    setCurrentWeekStart(getMondayLocal(new Date()));
+    if (isMobile) {
+      const diff = Math.floor((new Date().getTime() - getMondayLocal(new Date()).getTime()) / 86400000);
+      setMobileDayOffset(Math.max(0, Math.min(diff, 4)));
+    }
+  };
 
   return (
     <div className="workouts-page">
@@ -193,27 +243,28 @@ export default function WorkoutsPage() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button className="btn-app-ghost" onClick={() => setCurrentWeekStart(d => addDays(d, -7))} title="Previous week">
+            <button className="btn-app-ghost" onClick={handlePrev} title="Previous">
               <ChevronLeft size={18} />
             </button>
-            <button className="btn-app-secondary" onClick={() => setCurrentWeekStart(getMondayLocal(new Date()))} style={{ fontSize: "0.8rem", padding: "0.375rem 0.875rem" }}>
+            <button className="btn-app-secondary" onClick={handleToday} style={{ fontSize: "0.8rem", padding: "0.375rem 0.875rem" }}>
               Today
             </button>
-            <button className="btn-app-ghost" onClick={() => setCurrentWeekStart(d => addDays(d, 7))} title="Next week">
+            <button className="btn-app-ghost" onClick={handleNext} title="Next">
               <ChevronRight size={18} />
             </button>
           </div>
         </div>
 
-        <div style={{ overflowX: "auto", borderRadius: 16, boxShadow: "var(--card-shadow)" }}>
+        <div style={{ borderRadius: 16, boxShadow: "var(--card-shadow)" }}>
           <div style={{
             display: "grid",
-            gridTemplateColumns: `120px repeat(7, minmax(130px, 1fr))`,
+            gridTemplateColumns: isMobile
+              ? `80px repeat(3, 1fr)`
+              : `120px repeat(7, minmax(130px, 1fr))`,
             background: "var(--app-surface)",
             border: "1px solid var(--app-border)",
             borderRadius: 16,
             overflow: "hidden",
-            minWidth: 760,
           }}>
             {/* Corner label */}
             <div style={{
@@ -235,10 +286,10 @@ export default function WorkoutsPage() {
             </div>
 
             {/* Day headers */}
-            {weekDates.map((date, i) => {
+            {visibleDates.map((date, i) => {
+              const actualIdx = isMobile ? mobileDayOffset + i : i;
               const ds = formatDateLocal(date);
               const isToday = ds === todayStr;
-              const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
               return (
                 <div key={i} style={{
                   background: isToday ? "rgba(201,168,76,0.12)" : "#0d1117",
@@ -255,7 +306,7 @@ export default function WorkoutsPage() {
                     color: isToday ? "#c9a84c" : "rgba(232,224,208,0.45)",
                     marginBottom: "0.125rem",
                   }}>
-                    {DAYS[i]}
+                    {DAYS[actualIdx]}
                   </div>
                   <div style={{
                     fontSize: "0.75rem",
@@ -296,7 +347,7 @@ export default function WorkoutsPage() {
               </div>
 
               {/* Day cells */}
-              {weekDates.map((date, dayIdx) => {
+              {visibleDates.map((date, dayIdx) => {
                 const ds = formatDateLocal(date);
                 const isToday = ds === todayStr;
                 const pw = getPlannedForDate(date);
@@ -316,6 +367,7 @@ export default function WorkoutsPage() {
                         width: "100%",
                         borderRadius: 10,
                         padding: "0.5rem",
+                        position: "relative",
                         background:
                           status === "completed" ? "rgba(138,180,160,0.08)" :
                           status === "skipped" ? "rgba(255,255,255,0.03)" :
@@ -326,19 +378,8 @@ export default function WorkoutsPage() {
                           "rgba(168,196,224,0.2)"}`
                       }}>
                         <button
-                          onClick={() => handleDeleteScheduled(pw.id)}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteScheduled(pw.id); }}
                           className="plan-remove-btn"
-                          style={{
-                            position: "absolute",
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "#cbd5e1",
-                            fontSize: "0.7rem",
-                            lineHeight: 1,
-                            padding: 2,
-                            borderRadius: 4,
-                          }}
                           title="Remove"
                           aria-label="Remove workout"
                         >
@@ -361,22 +402,25 @@ export default function WorkoutsPage() {
                           </div>
                         </div>
                         {status === "planned" && (
-                          <div style={{ display: "flex", gap: "0.3rem", marginTop: "0.5rem" }}>
+                          <div style={{ display: "flex", gap: "0.25rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
                             <button
                               className="btn-app-primary"
+                              style={{ fontSize: "0.65rem", padding: "0.3rem 0.6rem" }}
                               onClick={() => handleStatusChange(pw, "completed")}
                               title="Mark completed"
                             >
-                              <Check size={12} /> Done
+                              <Check size={11} /> Done
                             </button>
                             <button
                               className="btn-app-secondary"
+                              style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }}
                               onClick={() => handleStatusChange(pw, "skipped")}
                             >
                               Skip
                             </button>
                             <button
                               className="btn-app-ghost"
+                              style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }}
                               onClick={() => openLogFor(pw)}
                             >
                               Log
@@ -384,9 +428,9 @@ export default function WorkoutsPage() {
                           </div>
                         )}
                         {status === "completed" && (
-                          <div style={{ display: "flex", gap: "0.3rem", marginTop: "0.5rem" }}>
-                            <button className="btn-app-ghost" onClick={() => openLogFor(pw)}>Edit log</button>
-                            <button className="btn-app-secondary" onClick={() => handleStatusChange(pw, "planned")}>Undo</button>
+                          <div style={{ display: "flex", gap: "0.25rem", marginTop: "0.5rem" }}>
+                            <button className="btn-app-ghost" style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }} onClick={() => openLogFor(pw)}>Edit log</button>
+                            <button className="btn-app-secondary" style={{ fontSize: "0.65rem", padding: "0.3rem 0.5rem" }} onClick={() => handleStatusChange(pw, "planned")}>Undo</button>
                           </div>
                         )}
                       </div>
