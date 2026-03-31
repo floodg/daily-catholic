@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { PlannedMeal, Meal, MealStatus, PlannedWorkout } from "../domain/types";
 import { getPlannedMeals } from "./planner/api";
 import { getMealsForUser } from "./meals/api";
+import { getWalkDashboardSummary, type WalkDashboardSummary } from "./walking/api";
 import { supabase } from "../lib/supabase";
 import { formatDateLocal } from "../lib/dateUtils";
 import { changePlannedMealStatusWithInventory } from "./mealCompletion";
@@ -18,12 +19,15 @@ const MEAL_TIME_POSITION: Record<string, number> = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [todaysMeals, setTodaysMeals] = useState<TodaysMeal[]>([]);
   const [mealsLoading, setMealsLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [todaysWorkouts, setTodaysWorkouts] = useState<PlannedWorkout[]>([]);
   const [walkingDone, setWalkingDone] = useState<boolean>(false);
+  const [walkSummary, setWalkSummary] = useState<WalkDashboardSummary | null>(null);
+  const [walkLoading, setWalkLoading] = useState(true);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -59,6 +63,14 @@ export default function Dashboard() {
     } catch (e) {
       console.error(e);
     }
+
+    getWalkDashboardSummary()
+      .then(setWalkSummary)
+      .catch(error => {
+        console.error('Failed to load synced walks', error);
+        setWalkSummary(null);
+      })
+      .finally(() => setWalkLoading(false));
   }, []);
 
   const formatMealTime = (time: string) => {
@@ -84,6 +96,12 @@ export default function Dashboard() {
       setProcessingId(null);
     }
   };
+
+  const today = formatDateLocal(new Date());
+  const hasSyncedWalkToday = Boolean(
+    walkSummary?.recentSessions.some((session) => formatDateLocal(new Date(session.startedAt)) === today)
+  );
+  const isWalkChecked = walkingDone || hasSyncedWalkToday;
 
   return (
     <div>
@@ -219,22 +237,120 @@ export default function Dashboard() {
             <div className="app-card" style={{ padding: '0.875rem 1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    id="walk-check"
-                    type="checkbox"
-                    checked={walkingDone}
-                    onChange={() => {
-                      const today = formatDateLocal(new Date());
+                  <button
+                    type="button"
+                    onClick={() => {
                       toggleWalkingComplete(today);
                       setWalkingDone(prev => !prev);
                     }}
-                  />
-                  <label htmlFor="walk-check" style={{ cursor: 'pointer' }}>
+                    aria-pressed={isWalkChecked}
+                    aria-label={isWalkChecked ? "Mark walk incomplete" : "Mark walk complete"}
+                    style={{
+                      width: '1.75rem',
+                      height: '1.75rem',
+                      borderRadius: '0.4rem',
+                      border: isWalkChecked ? '1px solid rgba(120, 208, 133, 0.65)' : '1px solid var(--app-border)',
+                      background: isWalkChecked ? 'linear-gradient(180deg, rgba(120, 208, 133, 0.28), rgba(120, 208, 133, 0.14))' : 'var(--app-bg)',
+                      color: isWalkChecked ? 'rgb(147, 220, 157)' : 'transparent',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: isWalkChecked ? '0 0 0 1px rgba(120, 208, 133, 0.12) inset' : 'none',
+                      padding: 0,
+                      fontSize: '1rem',
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toggleWalkingComplete(today);
+                      setWalkingDone(prev => !prev);
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 0,
+                      cursor: 'pointer',
+                      color: 'var(--parchment)',
+                      font: 'inherit',
+                      textAlign: 'left',
+                    }}
+                  >
                     🚶 40 min walk (7–10k steps)
-                  </label>
+                  </button>
                 </div>
                 <Link to="/app/workouts" className="btn-app-ghost">Plan workouts</Link>
               </div>
+            </div>
+            <div className="app-card" style={{ padding: '0.875rem 1rem', marginTop: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                <div style={{ fontWeight: 600, color: 'var(--parchment)' }}>Synced walks</div>
+                <span className="status-pill completed">Supabase</span>
+              </div>
+
+              {walkLoading ? (
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-subtle)' }}>Loading synced walks…</p>
+              ) : !walkSummary || walkSummary.recentSessions.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-subtle)', lineHeight: 1.5 }}>
+                  No synced walks yet. Record a walk in `oval-walker` and tap its sync button to see it here.
+                </p>
+              ) : (
+                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
+                    <div style={{ background: 'var(--app-bg)', border: '1px solid var(--app-border)', borderRadius: '0.625rem', padding: '0.75rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Recent sessions</div>
+                      <div style={{ fontWeight: 700, color: 'var(--parchment)' }}>{walkSummary.totalSessions}</div>
+                    </div>
+                    <div style={{ background: 'var(--app-bg)', border: '1px solid var(--app-border)', borderRadius: '0.625rem', padding: '0.75rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Steps</div>
+                      <div style={{ fontWeight: 700, color: 'var(--parchment)' }}>{walkSummary.totalSteps.toLocaleString()}</div>
+                    </div>
+                    <div style={{ background: 'var(--app-bg)', border: '1px solid var(--app-border)', borderRadius: '0.625rem', padding: '0.75rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Distance</div>
+                      <div style={{ fontWeight: 700, color: 'var(--parchment)' }}>{formatDistance(walkSummary.totalDistanceMeters)}</div>
+                    </div>
+                    <div style={{ background: 'var(--app-bg)', border: '1px solid var(--app-border)', borderRadius: '0.625rem', padding: '0.75rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Active time</div>
+                      <div style={{ fontWeight: 700, color: 'var(--parchment)' }}>{formatDuration(walkSummary.totalActiveMs)}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '0.5rem' }}>
+                    {walkSummary.recentSessions.map(session => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => navigate(`/app/walking/${session.id}`)}
+                        style={{ background: 'var(--app-bg)', border: '1px solid var(--app-border)', borderRadius: '0.625rem', padding: '0.75rem', textAlign: 'left', cursor: 'pointer' }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: 600, color: 'var(--parchment)' }}>
+                              {new Date(session.startedAt).toLocaleDateString('en-AU', {
+                                weekday: 'short',
+                                day: 'numeric',
+                                month: 'short',
+                              })}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              {formatDuration(session.activeMs)} active · {session.totalLaps} laps · {session.ovalName}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 600, color: 'var(--parchment)' }}>{session.totalSteps.toLocaleString()} steps</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{formatDistance(session.totalDistanceMeters)}</div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -250,4 +366,21 @@ export default function Dashboard() {
       </section>
     </div>
   );
+}
+
+function formatDuration(durationMs: number) {
+  const totalMinutes = Math.round(durationMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) {
+    return `${minutes}m`;
+  }
+  return `${hours}h ${minutes}m`;
+}
+
+function formatDistance(distanceMeters: number) {
+  if (distanceMeters >= 1000) {
+    return `${(distanceMeters / 1000).toFixed(2)} km`;
+  }
+  return `${Math.round(distanceMeters)} m`;
 }

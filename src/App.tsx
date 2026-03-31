@@ -23,6 +23,7 @@ import { AuthProvider, useAuth } from './context/AuthProvider'
 import LandingPage from './components/LandingPage'
 import FiatModePage from './features/fiat/FiatModePage'
 import MacrosPage from './features/macros/MacrosPage'
+import WalkDetailPage from './features/walking/WalkDetailPage'
 
 function ProtectedRoute() {
   const { session, loading, profile, profileLoading } = useAuth()
@@ -84,6 +85,7 @@ function App() {
                 <Route path="fiat" element={<FiatModePage />} />
               </Route>
               <Route path="dashboard" element={<Dashboard />} />
+              <Route path="walking/:sessionId" element={<WalkDetailPage />} />
               <Route path="meals" element={<MealsPage />} />
               <Route path="plan" element={<PlanPage />} />
               <Route path="training" element={<ProgramPage />} />
