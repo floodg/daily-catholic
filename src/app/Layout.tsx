@@ -53,6 +53,7 @@ const ADMIN_LINKS: NavLink[] = [
 const PAGE_TITLES: Record<string, string> = {
   '/app/fiat':                'Fiat Mode',
   '/app/dashboard':           'Dashboard',
+  '/app/walking':             'Walk Detail',
   '/app/plan':                'Weekly Plan',
   '/app/meals':               'Meals',
   '/app/shopping':            'Shopping List',
@@ -76,7 +77,7 @@ export default function Layout() {
   const navigate = useNavigate()
   const { signOut, profile } = useAuth()
 
-  const pageTitle = PAGE_TITLES[location.pathname] ?? 'Daily Catholic'
+  const pageTitle = Object.entries(PAGE_TITLES).find(([path]) => location.pathname.startsWith(path))?.[1] ?? 'Daily Catholic'
 
   const handleSignOut = async () => {
     setSidebarOpen(false)
