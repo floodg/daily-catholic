@@ -1,7 +1,13 @@
 package com.dailycatholic.app.ui.dashboard
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,13 +17,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -27,12 +38,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.dailycatholic.app.data.models.KitchenScanImageDto
 import com.dailycatholic.app.data.models.PlannedMealDto
 import com.dailycatholic.app.domain.todayIso
 import com.dailycatholic.app.ui.theme.AppBg
@@ -45,6 +62,7 @@ import com.dailycatholic.app.ui.theme.SacredGreen
 import com.dailycatholic.app.ui.theme.TextMuted
 import com.dailycatholic.app.ui.theme.TextSubtle
 import java.text.SimpleDateFormat
+import java.io.ByteArrayOutputStream
 import java.util.Calendar
 import java.util.Locale
 
@@ -68,10 +86,47 @@ private fun formatDistanceM(m: Double): String =
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
+    kitchenScanViewModel: KitchenScanViewModel = viewModel(factory = KitchenScanViewModel.Factory()),
     onSignOut: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val scanState by kitchenScanViewModel.state.collectAsStateWithLifecycle()
     val summary = viewModel.walkSummary()
+    val context = LocalContext.current
+    val scanImages = remember { mutableStateListOf<KitchenScanImageDto>() }
+
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap: Bitmap? ->
+        if (bitmap != null && scanImages.size < 3) {
+            scanImages.add(
+                KitchenScanImageDto(
+                    mimeType = "image/jpeg",
+                    base64 = bitmapToBase64(bitmap),
+                )
+            )
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            cameraLauncher.launch(null)
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(3)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val remaining = 3 - scanImages.size
+            uris.take(remaining).forEach { uri ->
+                val base64 = uriToBase64(context, uri.toString())
+                if (base64 != null) {
+                    scanImages.add(KitchenScanImageDto(mimeType = "image/jpeg", base64 = base64))
+                }
+            }
+        }
+    }
 
     Scaffold(
         containerColor = AppBg,
@@ -202,7 +257,147 @@ fun DashboardScreen(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            AppCard(title = "📸 Kitchen scan") {
+                Text(
+                    "Capture up to 3 photos of your fridge/cupboard. The AI suggests missing or low ingredients for this week's meals.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            if (scanImages.size < 3) {
+                                when (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)) {
+                                    PackageManager.PERMISSION_GRANTED -> {
+                                        cameraLauncher.launch(null)
+                                    }
+                                    else -> {
+                                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                }
+                            }
+                        },
+                        enabled = scanImages.size < 3 && !scanState.analyzing && !scanState.applying,
+                        colors = ButtonDefaults.buttonColors(containerColor = Gold.copy(alpha = 0.25f), contentColor = Gold),
+                    ) { Text("Take photo") }
+                    OutlinedButton(
+                        onClick = {
+                            galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        enabled = scanImages.size < 3 && !scanState.analyzing && !scanState.applying,
+                    ) { Text("Choose photos", color = TextMuted) }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "${scanImages.size}/3 selected",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSubtle,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { kitchenScanViewModel.analyze(scanImages.toList()) },
+                    enabled = scanImages.isNotEmpty() && !scanState.analyzing && !scanState.applying,
+                    colors = ButtonDefaults.buttonColors(containerColor = Gold.copy(alpha = 0.25f), contentColor = Gold),
+                ) {
+                    if (scanState.analyzing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Gold, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Analysing your kitchen…")
+                    } else {
+                        Text("Analyse kitchen")
+                    }
+                }
+
+                scanState.error?.let { err ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(err, style = MaterialTheme.typography.bodySmall, color = AuthErrorText)
+                }
+                scanState.summary?.let { summaryText ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(summaryText, style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                }
+
+                val reviewItems = (scanState.missing + scanState.low).distinct()
+                if (reviewItems.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = AppBorderGold.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Review before add", style = MaterialTheme.typography.titleMedium, color = Parchment)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    reviewItems.forEach { name ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(name, style = MaterialTheme.typography.bodyMedium, color = Parchment)
+                            OutlinedButton(onClick = { kitchenScanViewModel.toggleSelection(name) }) {
+                                Text(
+                                    if (scanState.selected.contains(name)) "Selected" else "Select",
+                                    color = TextMuted
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                    if (scanState.unknownCount > 0) {
+                        Text(
+                            "Couldn't assess ${scanState.unknownCount} ingredient(s).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSubtle,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { kitchenScanViewModel.applySelected() },
+                            enabled = scanState.selected.isNotEmpty() && !scanState.applying,
+                            colors = ButtonDefaults.buttonColors(containerColor = Gold.copy(alpha = 0.25f), contentColor = Gold),
+                        ) { Text(if (scanState.applying) "Adding..." else "Confirm items") }
+                        OutlinedButton(
+                            onClick = { kitchenScanViewModel.clearReview() },
+                            enabled = !scanState.applying,
+                        ) { Text("Clear review", color = TextMuted) }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = { kitchenScanViewModel.refreshOpenItems() },
+                    enabled = !scanState.loadingOpenItems,
+                ) {
+                    Text("Refresh open shopping items", color = TextMuted)
+                }
+                if (scanState.openItems.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    scanState.openItems.take(5).forEach { row ->
+                        Text("• ${row.ingredientName}", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                    }
+                }
+            }
         }
+    }
+}
+
+private fun bitmapToBase64(bitmap: Bitmap): String {
+    val stream = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+    return Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+}
+
+private fun uriToBase64(context: android.content.Context, uriString: String): String? {
+    return try {
+        val uri = android.net.Uri.parse(uriString)
+        val input = context.contentResolver.openInputStream(uri) ?: return null
+        val bitmap = BitmapFactory.decodeStream(input) ?: return null
+        input.close()
+        bitmapToBase64(bitmap)
+    } catch (_: Exception) {
+        null
     }
 }
 

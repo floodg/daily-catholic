@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Trash2, CheckCircle2, Circle, ShoppingCart, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, CheckCircle2, Circle, ShoppingCart, RotateCcw, ChevronDown, ChevronRight, Camera } from 'lucide-react';
 import type { ShoppingItem } from "../../domain/types";
 import { formatQuantity, isUnmeasuredQuantity, toBaseUnit } from "./quantityUtils";
 import { v4 as uuidv4 } from "../../storage/uuid";
@@ -8,6 +8,12 @@ import { formatDateLocal, getMondayLocal } from "../../lib/dateUtils";
 import {
   markAggregatedItemPurchased,
   fetchPurchasedShoppingItems,
+  fetchOpenShoppingListItems,
+  removeOpenShoppingListItem,
+  scanKitchenAnalyze,
+  scanKitchenApply,
+  type KitchenScanAnalyzeResult,
+  type OpenShoppingListItem,
   type PurchasedShoppingItem,
 } from "./api";
 import { unmarkPurchasedShoppingItem } from "./api";
@@ -18,6 +24,7 @@ import {
   resolvePreferredProductsForIngredientIds,
   type IngredientProductPreference,
 } from "../ingredients/api";
+import CameraCapture from "./CameraCapture";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -33,17 +40,35 @@ function parseProductBaseSize(product: IngredientProductPreference): { qty: numb
   return null;
 }
 
-type SectionKey = 'trip' | 'manual' | 'done';
+type SectionKey = 'trip' | 'scan' | 'manual' | 'done';
+
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function ShoppingPage() {
+  const scanFileInputRef = useRef<HTMLInputElement | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [aggregatedItems, setAggregatedItems] = useState<ShoppingItem[]>([]);
   const [manualItems, setManualItems] = useState<ShoppingItem[]>([]);
+  const [openScanItems, setOpenScanItems] = useState<OpenShoppingListItem[]>([]);
+  const [highlightedOpenItemIds, setHighlightedOpenItemIds] = useState<Set<string>>(new Set());
   const [newItemName, setNewItemName] = useState("");
   const [listLoading, setListLoading] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanApplying, setScanApplying] = useState(false);
+  const [scanSummary, setScanSummary] = useState<string | null>(null);
+  const [scanReview, setScanReview] = useState<KitchenScanAnalyzeResult | null>(null);
+  const [scanSelectedNames, setScanSelectedNames] = useState<Set<string>>(new Set());
   const [alternativesByItemId, setAlternativesByItemId] = useState<Map<string, IngredientProductPreference[]>>(new Map());
   const [ingredientLabelByItemId, setIngredientLabelByItemId] = useState<Map<string, string>>(new Map());
   const [ingredientIdByItemId, setIngredientIdByItemId] = useState<Map<string, string>>(new Map());
@@ -74,6 +99,15 @@ export default function ShoppingPage() {
     try {
       const rows = await fetchPurchasedShoppingItems();
       setPurchasedItems(rows);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const refreshOpenScanItems = async () => {
+    try {
+      const rows = await fetchOpenShoppingListItems();
+      setOpenScanItems(rows);
     } catch (err) {
       console.error(err);
     }
@@ -189,7 +223,7 @@ export default function ShoppingPage() {
         setIngredientLabelByItemId(nextLabelByItemId);
         setIngredientIdByItemId(nextIngredientIdByItemId);
       }
-      await refreshPurchased();
+      await Promise.all([refreshPurchased(), refreshOpenScanItems()]);
     } catch (err) {
       console.error(err);
     } finally {
@@ -281,6 +315,74 @@ export default function ShoppingPage() {
     }
   };
 
+  const handleScanFilesPicked = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList).slice(0, 3);
+    setScanLoading(true);
+    setScanSummary(null);
+    try {
+      const images = await Promise.all(
+        files.map(async (file) => ({
+          mimeType: file.type || 'image/jpeg',
+          base64: await fileToBase64(file),
+        }))
+      );
+      const result = await scanKitchenAnalyze(images);
+      setScanReview(result);
+      setScanSelectedNames(new Set([...result.missing, ...result.low]));
+      if (result.message) {
+        setScanSummary(result.message);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to analyse kitchen photos.');
+    } finally {
+      setScanLoading(false);
+      if (scanFileInputRef.current) {
+        scanFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleApplyScan = async () => {
+    if (!scanReview) return;
+    const names = Array.from(scanSelectedNames);
+    setScanApplying(true);
+    try {
+      const result = await scanKitchenApply(names);
+      await refreshOpenScanItems();
+      const insertedSet = new Set(result.insertedNames.map((n) => n.toLowerCase()));
+      const rows = await fetchOpenShoppingListItems();
+      const newIds = rows
+        .filter((row) => insertedSet.has(row.ingredientName.toLowerCase()))
+        .map((row) => row.id);
+      setHighlightedOpenItemIds(new Set(newIds));
+      window.setTimeout(() => setHighlightedOpenItemIds(new Set()), 12000);
+
+      setScanReview(null);
+      setScanSummary(
+        `Added ${result.added} item${result.added === 1 ? '' : 's'} · ` +
+        `${result.skipped} already on list · ` +
+        `couldn't assess ${scanReview.unknownCount}`
+      );
+    } catch (err) {
+      console.error(err);
+      alert('Failed to add scan suggestions.');
+    } finally {
+      setScanApplying(false);
+    }
+  };
+
+  const handleRemoveOpenItem = async (id: string) => {
+    try {
+      await removeOpenShoppingListItem(id);
+      await refreshOpenScanItems();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to remove item.');
+    }
+  };
+
   function toggleSection(key: SectionKey) {
     setCollapsedSections(prev => {
       const next = new Set(prev);
@@ -294,10 +396,11 @@ export default function ShoppingPage() {
   const tripStore = filteredAggregatedItems[0]?.store ?? aggregatedItems[0]?.store;
   const checkedManual = manualItems.filter(i => i.checked).length;
   const allManualDone = manualItems.length > 0 && checkedManual === manualItems.length;
-  const totalItems = filteredAggregatedItems.length + manualItems.length + purchasedItems.length;
+  const totalItems = filteredAggregatedItems.length + openScanItems.length + manualItems.length + purchasedItems.length;
   const doneCount = purchasedItems.length + checkedManual;
   const pct = totalItems === 0 ? 0 : Math.round((doneCount / totalItems) * 100);
   const isTripCollapsed = collapsedSections.has('trip');
+  const isScanCollapsed = collapsedSections.has('scan');
   const isManualCollapsed = collapsedSections.has('manual');
   const isDoneCollapsed = collapsedSections.has('done');
 
@@ -406,6 +509,64 @@ export default function ShoppingPage() {
     );
   }
 
+  function ScanReviewModal({
+    review,
+    selected,
+    applying,
+    onToggle,
+    onApply,
+    onClose,
+  }: {
+    review: KitchenScanAnalyzeResult;
+    selected: Set<string>;
+    applying: boolean;
+    onToggle: (name: string) => void;
+    onApply: () => void;
+    onClose: () => void;
+  }) {
+    const candidates = [...review.missing, ...review.low];
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={e => e.stopPropagation()}>
+          <h2>Kitchen Scan Results</h2>
+          <p>Select items to add to your shopping list.</p>
+          <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.75rem' }}>
+            {candidates.map((name) => (
+              <label
+                key={name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontFamily: 'DM Sans, sans-serif',
+                  color: 'var(--parchment)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(name)}
+                  onChange={() => onToggle(name)}
+                />
+                <span>{name}</span>
+              </label>
+            ))}
+          </div>
+          {review.unknownCount > 0 && (
+            <p className="form-hint" style={{ marginTop: '0.75rem' }}>
+              Couldn&apos;t assess {review.unknownCount} ingredient{review.unknownCount === 1 ? '' : 's'}.
+            </p>
+          )}
+          <div className="modal-actions">
+            <button className="btn-app-secondary" onClick={onClose} disabled={applying}>Cancel</button>
+            <button className="btn-app-primary" onClick={onApply} disabled={applying || selected.size === 0}>
+              {applying ? 'Adding...' : `Add ${selected.size} item${selected.size === 1 ? '' : 's'}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -418,6 +579,14 @@ export default function ShoppingPage() {
           <h1 className="page-title">🛒 Shopping <em>List</em></h1>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => scanFileInputRef.current?.click()}
+            className="btn-app-secondary"
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.875rem' }}
+            disabled={scanLoading || scanApplying}
+          >
+            <Camera size={14} /> {scanLoading ? 'Analysing...' : 'Scan Kitchen'}
+          </button>
           <button
             onClick={() => setHideChecked(h => !h)}
             className="btn-app-secondary"
@@ -434,6 +603,17 @@ export default function ShoppingPage() {
           </button>
         </div>
       </div>
+      <CameraCapture
+        ref={scanFileInputRef}
+        onFilesSelected={(files) => void handleScanFilesPicked(files)}
+      />
+      {scanSummary && (
+        <div className="app-card" style={{ marginBottom: '1rem', padding: '0.75rem 1rem' }}>
+          <p style={{ margin: 0, fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            {scanSummary}
+          </p>
+        </div>
+      )}
 
       {/* Progress bar */}
       <div className="app-card" style={{ marginBottom: '1.25rem' }}>
@@ -649,6 +829,92 @@ export default function ShoppingPage() {
         </div>
       )}
 
+      {/* ── From scans & reorder section ─────────────────────────────── */}
+      {!listLoading && openScanItems.length > 0 && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <button
+            onClick={() => toggleSection('scan')}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.5rem 0.75rem', background: 'transparent', border: 'none',
+              cursor: 'pointer', borderRadius: 8,
+              marginBottom: isScanCollapsed ? 0 : '0.25rem',
+            }}
+          >
+            <span style={{ fontSize: '1.1rem' }}>📸</span>
+            <span style={{
+              fontFamily: 'DM Sans, sans-serif', fontWeight: 700,
+              fontSize: '0.8rem', letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: 'var(--text-muted)',
+              flex: 1, textAlign: 'left',
+            }}>
+              From Scans & Reorder
+            </span>
+            <span style={{
+              fontFamily: 'DM Sans, monospace', fontSize: '0.7rem', fontWeight: 600,
+              color: 'var(--text-subtle)', background: 'var(--app-border)',
+              padding: '0.15rem 0.5rem', borderRadius: 100,
+            }}>
+              {openScanItems.length}
+            </span>
+            {isScanCollapsed
+              ? <ChevronRight size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+              : <ChevronDown size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+            }
+          </button>
+
+          {!isScanCollapsed && (
+            <div className="app-card" style={{ overflow: 'hidden' }}>
+              {openScanItems.map((row, idx) => (
+                <div
+                  key={row.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    padding: '0.875rem 1rem',
+                    borderBottom: idx < openScanItems.length - 1 ? '1px solid var(--app-border)' : 'none',
+                    background: highlightedOpenItemIds.has(row.id) ? 'rgba(226,186,84,0.1)' : 'transparent',
+                    transition: 'background 0.4s ease',
+                  }}
+                >
+                  <span style={{ color: 'var(--app-border-strong)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                    <Circle size={26} />
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
+                      color: 'var(--parchment)',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {row.ingredientName}
+                    </div>
+                    <div style={{
+                      fontFamily: 'DM Sans, monospace', fontSize: '0.72rem',
+                      color: 'var(--text-muted)', marginTop: '0.1rem',
+                    }}>
+                      {row.source === 'kitchen_scan' ? 'Kitchen scan' : row.source}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => void handleRemoveOpenItem(row.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      padding: '0.25rem', flexShrink: 0, display: 'flex',
+                      alignItems: 'center', color: 'var(--text-subtle)',
+                      opacity: 0.5, transition: 'opacity 0.15s',
+                    }}
+                    aria-label="Remove item"
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.5')}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── My Extras (manual items) section ─────────────────────────────── */}
       {!listLoading && manualItems.length > 0 && (
         <div style={{ marginBottom: '0.75rem' }}>
@@ -850,6 +1116,24 @@ export default function ShoppingPage() {
         <SwapProductModal
           item={swappingItem}
           onClose={() => setSwappingItem(null)}
+        />
+      )}
+
+      {scanReview && (
+        <ScanReviewModal
+          review={scanReview}
+          selected={scanSelectedNames}
+          applying={scanApplying}
+          onToggle={(name) => {
+            setScanSelectedNames(prev => {
+              const next = new Set(prev);
+              if (next.has(name)) next.delete(name);
+              else next.add(name);
+              return next;
+            });
+          }}
+          onApply={() => void handleApplyScan()}
+          onClose={() => setScanReview(null)}
         />
       )}
 

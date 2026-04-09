@@ -66,3 +66,48 @@ data class MarkMealEatenRpcBody(
     @SerializedName("p_planned_meal_id") val plannedMealId: String,
     @SerializedName("p_user_id") val userId: String,
 )
+
+data class KitchenScanImageDto(
+    @SerializedName("mimeType") val mimeType: String,
+    @SerializedName("base64") val base64: String,
+)
+
+data class KitchenScanAnalyzeRequestDto(
+    @SerializedName("action") val action: String = "analyze",
+    @SerializedName("images") val images: List<KitchenScanImageDto>,
+)
+
+data class KitchenScanAnalyzeResponseDto(
+    @SerializedName("missing") val missing: List<String> = emptyList(),
+    @SerializedName("low") val low: List<String> = emptyList(),
+    @SerializedName("sufficient") val sufficient: List<String> = emptyList(),
+    @SerializedName("unknown") val unknown: List<String> = emptyList(),
+    @SerializedName("unknownCount") val unknownCount: Int = 0,
+    @SerializedName("message") val message: String? = null,
+)
+
+data class KitchenScanApplyRequestDto(
+    @SerializedName("action") val action: String = "apply",
+    @SerializedName("names") val names: List<String>,
+)
+
+data class KitchenScanApplyResponseDto(
+    @SerializedName("added") val added: Int = 0,
+    @SerializedName("skipped") val skipped: Int = 0,
+    @SerializedName("insertedNames") val insertedNames: List<String> = emptyList(),
+)
+
+data class ShoppingListInsertDto(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("ingredient_name") val ingredientName: String,
+    @SerializedName("source") val source: String = "kitchen_scan",
+    @SerializedName("is_checked") val isChecked: Boolean = false,
+)
+
+data class ShoppingListRowDto(
+    val id: String,
+    @SerializedName("ingredient_name") val ingredientName: String,
+    @SerializedName("is_checked") val isChecked: Boolean,
+    val source: String?,
+    @SerializedName("created_at") val createdAt: String,
+)

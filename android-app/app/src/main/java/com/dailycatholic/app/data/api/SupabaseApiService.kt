@@ -5,8 +5,13 @@ import com.dailycatholic.app.data.models.FiatDayDto
 import com.dailycatholic.app.data.models.FiatUpsertDto
 import com.dailycatholic.app.data.models.LoginRequest
 import com.dailycatholic.app.data.models.LoginResponse
+import com.dailycatholic.app.data.models.KitchenScanAnalyzeRequestDto
+import com.dailycatholic.app.data.models.KitchenScanAnalyzeResponseDto
+import com.dailycatholic.app.data.models.KitchenScanApplyRequestDto
+import com.dailycatholic.app.data.models.KitchenScanApplyResponseDto
 import com.dailycatholic.app.data.models.MarkMealEatenRpcBody
 import com.dailycatholic.app.data.models.PlannedMealDto
+import com.dailycatholic.app.data.models.ShoppingListRowDto
 import com.dailycatholic.app.data.models.WalkSessionDto
 import com.google.gson.JsonObject
 import retrofit2.http.Body
@@ -61,4 +66,21 @@ interface SupabaseApiService {
         @Query("order") order: String = "started_at.desc",
         @Query("limit") limit: Int = 10,
     ): List<WalkSessionDto>
+
+    @POST("functions/v1/scan-kitchen")
+    suspend fun scanKitchenAnalyze(
+        @Body body: KitchenScanAnalyzeRequestDto,
+    ): KitchenScanAnalyzeResponseDto
+
+    @POST("functions/v1/scan-kitchen")
+    suspend fun scanKitchenApply(
+        @Body body: KitchenScanApplyRequestDto,
+    ): KitchenScanApplyResponseDto
+
+    @GET("rest/v1/shopping_list")
+    suspend fun listOpenShoppingListItems(
+        @Query("select") select: String = "id,ingredient_name,is_checked,source,created_at",
+        @Query("is_checked") isCheckedEq: String = "eq.false",
+        @Query("order") order: String = "created_at.desc",
+    ): List<ShoppingListRowDto>
 }

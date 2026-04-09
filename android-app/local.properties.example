@@ -9,3 +9,6 @@ supabase.anonKey=<your-anon-key-from-supabase-status>
 # For production / Supabase cloud:
 # supabase.url=https://<your-project-ref>.supabase.co
 # supabase.anonKey=<your-production-anon-key>
+
+# Kitchen scan uses the Supabase Edge Function `scan-kitchen`.
+# Configure GEMINI_API_KEY on Supabase secrets (server-side only).
