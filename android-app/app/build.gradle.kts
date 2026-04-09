@@ -15,11 +15,11 @@ val localProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.joesketo.app"
+    namespace = "com.dailycatholic.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.joesketo.app"
+        applicationId = "com.dailycatholic.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
@@ -73,6 +73,9 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation("androidx.compose.ui:ui-text-google-fonts")
+    implementation(libs.androidx.browser)
 
     // Networking
     implementation(libs.retrofit)
