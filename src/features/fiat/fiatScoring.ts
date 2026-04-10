@@ -188,6 +188,41 @@ export function getSectionsForDate(isoDate: string): Section[] {
   return getSections(isSunday, dayOfWeek)
 }
 
+/** One row for the public landing page — non-bonus checks only. */
+export interface FidelityLandingRow {
+  label: string
+  color: string
+  points: number
+}
+
+/** Section caps for a typical weekday (Mon–Sat); matches Fiat Mode `maxScore` those days. */
+export function getFidelityLandingWeekdayRows(): FidelityLandingRow[] {
+  const sections = getSections(false, 1)
+  return sections
+    .map(s => ({
+      label: s.title,
+      color: s.color,
+      points: s.checks.filter(c => !c.bonus).reduce((sum, c) => sum + c.points, 0),
+    }))
+    .filter(r => r.points > 0)
+}
+
+export function getFidelityWeekdayMax(): number {
+  return getFidelityLandingWeekdayRows().reduce((s, r) => s + r.points, 0)
+}
+
+/** Non-bonus fidelity from Sunday Mass only (Sundays). */
+export function getSundayMassFidelityPoints(): number {
+  const sections = getSections(true, 0)
+  const eu = sections.find(s => s.id === 'eucharist')
+  if (!eu) return 0
+  return eu.checks.filter(c => !c.bonus).reduce((sum, c) => sum + c.points, 0)
+}
+
+export function getFidelitySundayMax(): number {
+  return getFidelityWeekdayMax() + getSundayMassFidelityPoints()
+}
+
 export function maxScoreForSections(sections: Section[]): number {
   return sections.flatMap(s => s.checks).filter(c => !c.bonus).reduce((sum, c) => sum + c.points, 0)
 }
