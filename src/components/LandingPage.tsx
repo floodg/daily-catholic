@@ -40,6 +40,16 @@ const VERSES = [
   { text: '"Receive the day as a gift and return it as an offering."', ref: 'Fiat spirituality' },
 ]
 
+/** Public Fidelity Score explainer — six categories, 100 points total. */
+const FIDELITY_SCORE_BREAKDOWN = [
+  { label: 'Word of God', pts: 15, color: '#c9a84c' },
+  { label: 'Eucharist', pts: 20, color: '#e8d5a3' },
+  { label: 'Divine Will', pts: 25, color: '#a8c4e0' },
+  { label: 'Body', pts: 20, color: '#8ab4a0' },
+  { label: 'Order', pts: 10, color: '#9b8ec4' },
+  { label: 'Examen', pts: 10, color: '#b87333' },
+] as const
+
 export default function LandingPage() {
   const { session, loading: authLoading } = useAuth()
   const [mounted, setMounted] = useState(false)
@@ -383,6 +393,40 @@ export default function LandingPage() {
           margin: 0 auto;
           text-align: center;
         }
+        .score-breakdown-row {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          max-width: 480px;
+          margin: 0 auto 0.75rem;
+        }
+        .score-breakdown-label {
+          flex: 0 0 7.5rem;
+          font-family: 'Crimson Text', Georgia, serif;
+          font-size: 0.95rem;
+          color: rgba(232,224,208,0.55);
+          text-align: left;
+        }
+        .score-breakdown-track {
+          flex: 1;
+          min-width: 0;
+          height: 6px;
+          border-radius: 100px;
+          background: rgba(255,255,255,0.05);
+          overflow: hidden;
+        }
+        .score-breakdown-fill {
+          height: 100%;
+          border-radius: 100px;
+          opacity: 0.7;
+        }
+        .score-breakdown-pts {
+          flex: 0 0 1.75rem;
+          font-family: 'Cinzel', serif;
+          font-size: 0.65rem;
+          letter-spacing: 0.1em;
+          text-align: right;
+        }
         .score-rings-row {
           display: flex;
           justify-content: center;
@@ -516,7 +560,7 @@ export default function LandingPage() {
           {/* Score preview */}
           <section className="score-section" id="score">
             <div className="pillars-eyebrow">The Measure</div>
-            <h2 className="pillars-title">Fidelity Score · 0–100</h2>
+            <h2 className="pillars-title">Fidelity Score • 0–100</h2>
             <p style={{
               fontFamily: 'Crimson Text, Georgia, serif',
               fontSize: '1.1rem', lineHeight: 1.75,
@@ -528,45 +572,19 @@ export default function LandingPage() {
               Simple. Honest. Repeatable.
             </p>
 
-            {/* Mini score breakdown */}
-            {[
-              { label: 'Word of God',   pts: 15, color: '#c9a84c' },
-              { label: 'Eucharist',     pts: 20, color: '#e8d5a3' },
-              { label: 'Divine Will',   pts: 25, color: '#a8c4e0' },
-              { label: 'Body',          pts: 20, color: '#8ab4a0' },
-              { label: 'Order',         pts: 10, color: '#9b8ec4' },
-              { label: 'Examen',        pts: 10, color: '#b87333' },
-            ].map(row => (
-              <div key={row.label} style={{
-                display: 'flex', alignItems: 'center', gap: '1rem',
-                marginBottom: '0.75rem', maxWidth: 440, margin: '0 auto 0.75rem',
-              }}>
-                <div style={{
-                  fontFamily: 'Crimson Text, Georgia, serif',
-                  fontSize: '0.95rem', color: 'rgba(232,224,208,0.55)',
-                  width: 120, textAlign: 'right', flexShrink: 0,
-                }}>
-                  {row.label}
+            {/* Mini score breakdown — weights sum to 100 */}
+            {FIDELITY_SCORE_BREAKDOWN.map(row => (
+              <div key={row.label} className="score-breakdown-row">
+                <span className="score-breakdown-label">{row.label}</span>
+                <div className="score-breakdown-track">
+                  <div
+                    className="score-breakdown-fill"
+                    style={{ width: `${row.pts}%`, background: row.color }}
+                  />
                 </div>
-                <div style={{
-                  flex: 1, height: 6, borderRadius: 100,
-                  background: 'rgba(255,255,255,0.05)',
-                  overflow: 'hidden',
-                }}>
-                  <div style={{
-                    height: '100%', borderRadius: 100,
-                    background: row.color,
-                    width: `${row.pts}%`,
-                    opacity: 0.7,
-                  }} />
-                </div>
-                <div style={{
-                  fontFamily: 'Cinzel, serif', fontSize: '0.65rem',
-                  letterSpacing: '0.1em', color: row.color,
-                  width: 32, textAlign: 'left', flexShrink: 0,
-                }}>
+                <span className="score-breakdown-pts" style={{ color: row.color }}>
                   {row.pts}
-                </div>
+                </span>
               </div>
             ))}
 
