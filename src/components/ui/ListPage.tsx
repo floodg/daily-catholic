@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Search, Plus, X } from 'lucide-react'
 
 export type PanelMode = 'view' | 'edit' | 'new' | null
@@ -59,10 +59,27 @@ export default function ListPage<T extends ListItem>({
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<T | null>(defaultSelected)
   const [panelMode, setPanelMode] = useState<PanelMode>(defaultSelected ? (defaultMode ?? 'view') : null)
+  const [isMobile, setIsMobile] = useState(false)
+  const detailRef = useRef<HTMLDivElement | null>(null)
+  const selectedItemRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     onStateChange?.(selected, panelMode)
   }, [selected, panelMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Track mobile viewport
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    if ('addEventListener' in mq) {
+      mq.addEventListener('change', update)
+      return () => mq.removeEventListener('change', update)
+    } else {
+      window.addEventListener('resize', update)
+      return () => window.removeEventListener('resize', update)
+    }
+  }, [])
 
   const filtered = searchFilter && query.trim()
     ? items.filter(item => searchFilter(item, query.trim()))
@@ -78,12 +95,43 @@ export default function ListPage<T extends ListItem>({
     setPanelMode('new')
   }
 
+  // Smooth scroll helpers
+  const scrollToElement = (el: HTMLElement | null) => {
+    if (!el) return
+    const headerOffset = 72
+    const y = el.getBoundingClientRect().top + window.scrollY - headerOffset
+    window.scrollTo({ top: y, behavior: 'smooth' })
+  }
+  const scrollToDetail = () => scrollToElement(detailRef.current)
+  const scrollToSelected = () => scrollToElement(selectedItemRef.current)
+
   const handleClose = () => {
+    // On mobile, treat close as "back to list" when an item is selected (not "new")
+    if (isMobile && selected && panelMode !== 'new') {
+      setPanelMode(null)
+      // Defer scroll until after layout updates
+      setTimeout(() => { scrollToSelected() }, 0)
+      return
+    }
     setSelected(null)
     setPanelMode(null)
   }
 
+  const handleBackToList = () => {
+    setPanelMode(null)
+    setTimeout(() => { scrollToSelected() }, 0)
+  }
+
   const panelOpen = panelMode !== null
+
+  // When opening detail on mobile, scroll it into view
+  useEffect(() => {
+    if (isMobile && panelOpen) {
+      // Wait a tick for the panel to render
+      const id = window.setTimeout(() => { scrollToDetail() }, 0)
+      return () => window.clearTimeout(id)
+    }
+  }, [isMobile, panelOpen, selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
@@ -105,7 +153,7 @@ export default function ListPage<T extends ListItem>({
       {/* Two-column layout */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: (alwaysTwoColumn || panelOpen) ? '320px 1fr' : '1fr',
+        gridTemplateColumns: isMobile ? '1fr' : ((alwaysTwoColumn || panelOpen) ? '320px 1fr' : '1fr'),
         gap: '1.25rem',
         alignItems: 'start',
         transition: 'grid-template-columns 0.25s ease',
@@ -144,27 +192,53 @@ export default function ListPage<T extends ListItem>({
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {filtered.map(item =>
-                renderListItem(item, selected?.id === item.id && panelMode !== 'new', handleSelect)
-              )}
+              {filtered.map(item => {
+                const isSelected = selected?.id === item.id && panelMode !== 'new'
+                return (
+                  <div
+                    key={item.id}
+                    id={`list-item-${item.id}`}
+                    ref={isSelected ? selectedItemRef : undefined}
+                  >
+                    {renderListItem(item, isSelected, handleSelect)}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
 
         {/* Detail panel */}
         {panelOpen ? (
-          <div className="app-card" style={{ position: 'sticky', top: '72px', overflow: 'visible' }}>
+          <div
+            className="app-card"
+            ref={detailRef}
+            style={{ position: isMobile ? 'static' : 'sticky', top: isMobile ? undefined : '72px', overflow: 'visible' }}
+          >
             <div style={{
               padding: '1rem 1.25rem 0.75rem',
               borderBottom: '1px solid var(--app-border)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
-              <span style={{
-                fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em',
-                textTransform: 'uppercase', color: 'var(--text-subtle)', fontFamily: 'DM Sans, sans-serif',
-              }}>
-                {panelMode === 'new' ? 'New Item' : (selected?.name ?? 'Details')}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                {isMobile && panelMode !== 'new' && (
+                  <button
+                    className="btn-app-ghost"
+                    onClick={handleBackToList}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                    aria-label="Back to list"
+                  >
+                    ← Back
+                  </button>
+                )}
+                <span style={{
+                  fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em',
+                  textTransform: 'uppercase', color: 'var(--text-subtle)', fontFamily: 'DM Sans, sans-serif',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {panelMode === 'new' ? 'New Item' : (selected?.name ?? 'Details')}
+                </span>
+              </div>
               <button className="btn-app-ghost" onClick={handleClose} style={{ padding: '0.25rem' }}>
                 <X size={16} />
               </button>
@@ -173,7 +247,7 @@ export default function ListPage<T extends ListItem>({
               {renderDetail(panelMode === 'new' ? null : selected, handleClose, panelMode, setPanelMode)}
             </div>
           </div>
-        ) : alwaysTwoColumn ? (
+        ) : (alwaysTwoColumn && !isMobile) ? (
           <div className="app-card" style={{ position: 'sticky', top: '72px', padding: '1.5rem 1.25rem', textAlign: 'center' }}>
             {emptyDetail ?? (
               <p style={{
