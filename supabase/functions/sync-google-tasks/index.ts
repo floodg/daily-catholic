@@ -100,7 +100,11 @@ Return ONLY a JSON object with no markdown, no backticks, no explanation:
 
 // --- Main ---
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  const url = new URL(req.url);
+  const debug = url.searchParams.get("debug") === "1" || url.searchParams.get("debug") === "true";
+  const onlyStore = url.searchParams.get("store") || undefined;
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey =
     Deno.env.get("SERVICE_ROLE_KEY") ??
@@ -108,8 +112,8 @@ Deno.serve(async () => {
     Deno.env.get("SB_SERVICE_ROLE_KEY") ??
     "";
   if (!supabaseServiceKey) {
-    // Avoid failing hard; surface a soft error so cron doesn't retry storm.
-    return new Response(JSON.stringify({ ok: false, error: "missing_service_role_key" }), { status: 200 });
+    const body = { ok: false, error: "missing_service_role_key" };
+    return new Response(JSON.stringify(body), { status: 200 });
   }
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -117,27 +121,38 @@ Deno.serve(async () => {
   try {
     token = await getAccessToken();
   } catch (_e) {
-    // If auth fails, return 200 to avoid retries storms; log-like response.
-    return new Response(JSON.stringify({ ok: false, error: "google_auth_failed" }), { status: 200 });
+    const body = { ok: false, error: "google_auth_failed" };
+    return new Response(JSON.stringify(body), { status: 200 });
   }
 
-  for (const store of STORES) {
-    const listId = await getTaskListId(token, store);
-    if (!listId) continue;
+  const storesToProcess = onlyStore ? STORES.filter((s) => s.toLowerCase() === onlyStore.toLowerCase()) : STORES;
+  const runSummary: Record<string, unknown> = debug ? {} : {};
 
-    const tasks = await getTasks(token, listId);
-    if (!Array.isArray(tasks) || tasks.length === 0) continue;
+  for (const store of storesToProcess) {
+    let summary: any = debug ? { store } : null;
+    const listId = await getTaskListId(token!, store);
+    if (debug) summary.listId = listId ?? null;
+    if (!listId) {
+      if (debug) (runSummary as any)[store] = summary;
+      continue;
+    }
 
+    const tasks = await getTasks(token!, listId);
+    if (debug) summary.numTasks = tasks.length;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      if (debug) (runSummary as any)[store] = summary;
+      continue;
+    }
+
+    let inserted = 0;
+    const errors: string[] = [];
     for (const task of tasks) {
       const title: string = task?.title ?? "";
-      if (!title) {
-        // Skip unnamed tasks
-        continue;
-      }
+      if (!title) continue;
 
       const product = await enrichWithGemini(title, store);
 
-      await supabase.from("shopping_list_items").insert({
+      const { error } = await supabase.from("shopping_list_items").insert({
         raw_name: title,
         name: product.name ?? title,
         brand: product.brand ?? null,
@@ -150,12 +165,28 @@ Deno.serve(async () => {
         source: "google_tasks",
         enriched: product.enriched !== false,
       });
+      if (error) {
+        errors.push(`insert_failed:${error.message}`);
+        continue;
+      }
+      inserted += 1;
 
       // Best-effort delete; ignore errors
-      await deleteTask(token, listId, task.id);
+      try {
+        await deleteTask(token!, listId, task.id);
+      } catch {
+        // ignore
+      }
+    }
+
+    if (debug) {
+      summary.inserted = inserted;
+      if (errors.length) summary.errors = errors;
+      (runSummary as any)[store] = summary;
     }
   }
 
-  return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  const body = debug ? { ok: true, summary: runSummary } : { ok: true };
+  return new Response(JSON.stringify(body), { status: 200 });
 });
 
