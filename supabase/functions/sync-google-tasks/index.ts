@@ -102,8 +102,15 @@ Return ONLY a JSON object with no markdown, no backticks, no explanation:
 
 Deno.serve(async () => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
+  const supabaseServiceKey =
+    Deno.env.get("SERVICE_ROLE_KEY") ??
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    Deno.env.get("SB_SERVICE_ROLE_KEY") ??
+    "";
+  if (!supabaseServiceKey) {
+    // Avoid failing hard; surface a soft error so cron doesn't retry storm.
+    return new Response(JSON.stringify({ ok: false, error: "missing_service_role_key" }), { status: 200 });
+  }
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   let token: string | null = null;
