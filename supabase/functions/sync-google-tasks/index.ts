@@ -351,7 +351,7 @@ const persistIngredientPreferences = async (
 
 Deno.serve(async () => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   const debugLog: string[] = [];
@@ -382,6 +382,8 @@ Deno.serve(async () => {
     log(`[sync] ${store} tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`);
     if (!Array.isArray(tasks) || tasks.length === 0) continue;
 
+    let inserted = 0;
+    const errors: string[] = [];
     for (const task of tasks) {
       const title: string = task?.title ?? "";
       log(`[sync] Processing task: "${title}" (store=${store} id=${task.id})`);
