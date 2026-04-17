@@ -8,7 +8,11 @@ import { formatDateLocal, getMondayLocal } from "../../lib/dateUtils";
 import {
   markAggregatedItemPurchased,
   fetchPurchasedShoppingItems,
+  fetchPendingShoppingListItems,
+  checkOffPendingShoppingListItem,
+  deletePendingShoppingListItem,
   type PurchasedShoppingItem,
+  type PendingShoppingListItem,
 } from "./api";
 import { unmarkPurchasedShoppingItem } from "./api";
 import { getShoppingTrips, updateShoppingTripItem } from "../shopping-trips/api";
@@ -33,7 +37,7 @@ function parseProductBaseSize(product: IngredientProductPreference): { qty: numb
   return null;
 }
 
-type SectionKey = 'trip' | 'manual' | 'done';
+type SectionKey = 'trip' | 'tasks' | 'manual' | 'done';
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
@@ -52,6 +56,7 @@ export default function ShoppingPage() {
   const [collapsedSections, setCollapsedSections] = useState<Set<SectionKey>>(new Set());
   const [showAddForm, setShowAddForm] = useState(false);
   const [hideChecked, setHideChecked] = useState(false);
+  const [pendingItems, setPendingItems] = useState<PendingShoppingListItem[]>([]);
 
   useEffect(() => {
     const today = new Date();
@@ -60,7 +65,8 @@ export default function ShoppingPage() {
     sunday.setDate(sunday.getDate() + 6);
     setStartDate(formatDateLocal(monday));
     setEndDate(formatDateLocal(sunday));
-
+    refreshPending();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -74,6 +80,15 @@ export default function ShoppingPage() {
     try {
       const rows = await fetchPurchasedShoppingItems();
       setPurchasedItems(rows);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const refreshPending = async () => {
+    try {
+      const rows = await fetchPendingShoppingListItems();
+      setPendingItems(rows);
     } catch (err) {
       console.error(err);
     }
@@ -252,6 +267,27 @@ export default function ShoppingPage() {
     );
   };
 
+  const handleCheckPendingItem = async (id: string) => {
+    try {
+      await checkOffPendingShoppingListItem(id);
+      await refreshPending();
+      await refreshPurchased();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to check off item.');
+    }
+  };
+
+  const handleDeletePendingItem = async (id: string) => {
+    try {
+      await deletePendingShoppingListItem(id);
+      setPendingItems(prev => prev.filter(i => i.id !== id));
+    } catch (err) {
+      console.error(err);
+      alert('Failed to remove item.');
+    }
+  };
+
   const handleMarkPurchased = async (item: any) => {
     try {
       await markAggregatedItemPurchased({
@@ -294,10 +330,11 @@ export default function ShoppingPage() {
   const tripStore = filteredAggregatedItems[0]?.store ?? aggregatedItems[0]?.store;
   const checkedManual = manualItems.filter(i => i.checked).length;
   const allManualDone = manualItems.length > 0 && checkedManual === manualItems.length;
-  const totalItems = filteredAggregatedItems.length + manualItems.length + purchasedItems.length;
+  const totalItems = filteredAggregatedItems.length + manualItems.length + pendingItems.length + purchasedItems.length;
   const doneCount = purchasedItems.length + checkedManual;
   const pct = totalItems === 0 ? 0 : Math.round((doneCount / totalItems) * 100);
   const isTripCollapsed = collapsedSections.has('trip');
+  const isTasksCollapsed = collapsedSections.has('tasks');
   const isManualCollapsed = collapsedSections.has('manual');
   const isDoneCollapsed = collapsedSections.has('done');
 
@@ -641,6 +678,93 @@ export default function ShoppingPage() {
                     onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
                   >
                     🔄
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Google Tasks section ──────────────────────────────────────────── */}
+      {!listLoading && pendingItems.length > 0 && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <button
+            onClick={() => toggleSection('tasks')}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.5rem 0.75rem', background: 'transparent', border: 'none',
+              cursor: 'pointer', borderRadius: 8,
+              marginBottom: isTasksCollapsed ? 0 : '0.25rem',
+            }}
+          >
+            <span style={{ fontSize: '1.1rem' }}>📋</span>
+            <span style={{
+              fontFamily: 'DM Sans, sans-serif', fontWeight: 700,
+              fontSize: '0.8rem', letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: 'var(--text-muted)',
+              flex: 1, textAlign: 'left',
+            }}>
+              Google Tasks
+            </span>
+            <span style={{
+              fontFamily: 'DM Sans, monospace', fontSize: '0.7rem', fontWeight: 600,
+              color: 'var(--text-subtle)',
+              background: 'var(--app-border)',
+              padding: '0.15rem 0.5rem', borderRadius: 100,
+            }}>
+              {pendingItems.length}
+            </span>
+            {isTasksCollapsed
+              ? <ChevronRight size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+              : <ChevronDown size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+            }
+          </button>
+
+          {!isTasksCollapsed && (
+            <div className="app-card" style={{ overflow: 'hidden' }}>
+              {pendingItems.map((item, idx) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    padding: '0.875rem 1rem',
+                    borderBottom: idx < pendingItems.length - 1 ? '1px solid var(--app-border)' : 'none',
+                  }}
+                >
+                  <button
+                    onClick={() => handleCheckPendingItem(item.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center',
+                      color: 'var(--app-border-strong)', transition: 'color 0.15s',
+                    }}
+                    aria-label="Mark as purchased"
+                  >
+                    <Circle size={26} />
+                  </button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
+                      color: 'var(--parchment)',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {item.ingredientName}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDeletePendingItem(item.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      padding: '0.25rem', flexShrink: 0, display: 'flex',
+                      alignItems: 'center', color: 'var(--text-subtle)',
+                      opacity: 0.5, transition: 'opacity 0.15s',
+                    }}
+                    aria-label="Remove item"
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.5')}
+                  >
+                    <Trash2 size={16} />
                   </button>
                 </div>
               ))}

@@ -103,6 +103,65 @@ export async function fetchPurchasedShoppingItems(): Promise<PurchasedShoppingIt
   }));
 }
 
+// ─── Pending (Google Tasks) items ─────────────────────────────────────────────
+
+export interface PendingShoppingListItem {
+  id: string;
+  ingredientName: string;
+  source: string;
+  createdAt: string;
+}
+
+/** Reads unchecked items from shopping_list (e.g. synced from Google Tasks). */
+export async function fetchPendingShoppingListItems(): Promise<PendingShoppingListItem[]> {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from('shopping_list')
+    .select('id, ingredient_name, source, created_at')
+    .eq('user_id', user.id)
+    .eq('is_checked', false)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  return (data as any[]).map(row => ({
+    id: row.id as string,
+    ingredientName: row.ingredient_name as string,
+    source: row.source as string,
+    createdAt: row.created_at as string,
+  }));
+}
+
+/** Marks a pending shopping_list item as purchased (is_checked → true). */
+export async function checkOffPendingShoppingListItem(id: string): Promise<void> {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (!user) throw new Error('Not authenticated');
+
+  const { error } = await supabase
+    .from('shopping_list')
+    .update({ is_checked: true })
+    .eq('id', id)
+    .eq('user_id', user.id);
+  if (error) throw error;
+}
+
+/** Removes a pending shopping_list item without purchasing it. */
+export async function deletePendingShoppingListItem(id: string): Promise<void> {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (!user) throw new Error('Not authenticated');
+
+  const { error } = await supabase
+    .from('shopping_list')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id);
+  if (error) throw error;
+}
+
 /**
  * Unmark a purchased shopping item by deleting it from the shopping_list.
  * This effectively moves it back into the "to buy" list in the UI.
