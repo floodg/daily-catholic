@@ -2,8 +2,12 @@
 
 Scheduled Edge Function that:
 - Polls named Google Task lists (Coles, Woolworths, Aldi)
-- Enriches each task with Gemini 2.0 Flash (grounded Google Search)
-- Inserts enriched item into `shopping_list_items`
+- For each task, checks `store_products` first for an existing match per store; only calls Gemini for stores where no match is found
+- Persists any newly enriched products into `store_products` (global catalogue rows)
+- Resolves or creates an `ingredients` row from the task title
+- Sets `ingredients.default_store_product_id` using Coles-brand-first, then cheapest-available rule
+- Replaces `ingredient_store_product_options` with the non-default alternatives
+- Inserts the default product details into `shopping_list_items`
 - Deletes the task from Google Tasks
 
 ### Required secrets
