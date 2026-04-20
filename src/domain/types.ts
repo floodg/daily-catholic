@@ -218,5 +218,7 @@ export interface ShoppingTrip {
   purchasedAt: string; // ISO timestamptz
   notes?: string;
   createdAt: string;
+  /** Null while the trip is still being shopped. Set by a DB trigger once every linked trip item has a checked shopping_list row. */
+  completedAt?: string;
   items: ShoppingTripItem[];
 }

@@ -319,6 +319,87 @@ const resolveIngredient = async (
   return (created as { id: string }).id;
 };
 
+// --- Shopping Trip Resolution ---
+// Find-or-create the latest OPEN (completed_at is null) shopping_trips row
+// for the given user + store. Shopping may span multiple days between when
+// items are added to Google Tasks and when the user actually goes shopping,
+// so we accumulate into the currently-open trip regardless of date. When the
+// user checks off the final item in a trip, a DB trigger marks it complete;
+// subsequent syncs then create a fresh trip.
+
+const findOrCreateOpenTrip = async (
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  store: string,
+  log: (m: string) => void
+): Promise<string | null> => {
+  const { data: existing, error: findErr } = await supabase
+    .from("shopping_trips")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("store", store)
+    .is("completed_at", null)
+    .order("purchased_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (findErr) {
+    log(`[trip] lookup FAILED for store=${store}: ${JSON.stringify(findErr)}`);
+    return null;
+  }
+  if (existing) {
+    log(`[trip] reusing open trip id=${(existing as { id: string }).id} store=${store}`);
+    return (existing as { id: string }).id;
+  }
+
+  const { data: created, error: insertErr } = await supabase
+    .from("shopping_trips")
+    .insert({
+      user_id: userId,
+      store,
+      purchased_at: new Date().toISOString(),
+      notes: "Auto-created from Google Tasks sync",
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !created) {
+    log(`[trip] create FAILED for store=${store}: ${JSON.stringify(insertErr)}`);
+    return null;
+  }
+
+  log(`[trip] created trip id=${(created as { id: string }).id} store=${store}`);
+  return (created as { id: string }).id;
+};
+
+// --- Pack Size Parsing ---
+// Parse common size labels returned by Claude (e.g. "500g", "1 kg", "750 ml",
+// "2 L", "6 pack", "12pk", "1 each") into a numeric pack_quantity + pack_unit.
+// Kept intentionally simple; toBaseUnit on the client handles normalisation.
+
+const parsePackSize = (sizeLabel: string | null): { qty: number; unit: string } | null => {
+  if (!sizeLabel) return null;
+  const s = sizeLabel.trim().toLowerCase();
+  if (!s) return null;
+
+  const weightVol = s.match(/^(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\b/);
+  if (weightVol) {
+    return { qty: Number(weightVol[1]), unit: weightVol[2] };
+  }
+
+  const pack = s.match(/^(\d+(?:\.\d+)?)\s*(pack|pk|pkt|pc|pcs|piece|pieces|each|ea|ct|count|x)\b/);
+  if (pack) {
+    return { qty: Number(pack[1]), unit: "units" };
+  }
+
+  const bareNumber = s.match(/^(\d+(?:\.\d+)?)$/);
+  if (bareNumber) {
+    return { qty: Number(bareNumber[1]), unit: "units" };
+  }
+
+  return null;
+};
+
 // --- Persist Ingredient Preferences ---
 
 const persistIngredientPreferences = async (
@@ -382,6 +463,16 @@ Deno.serve(async () => {
     log(`[sync] ${store} tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`);
     if (!Array.isArray(tasks) || tasks.length === 0) continue;
 
+    // Resolve (or create) a trip for today scoped to this store. Items below
+    // will be inserted as shopping_trip_items linked to this trip. If no
+    // SYNC_USER_ID is configured we cannot create user-scoped trips.
+    let tripId: string | null = null;
+    if (syncUserId) {
+      tripId = await findOrCreateOpenTrip(supabase, syncUserId, store, log);
+    } else {
+      log(`[sync] ${store}: SYNC_USER_ID not set — cannot create shopping trip; items will be enriched only`);
+    }
+
     let inserted = 0;
     const errors: string[] = [];
     for (const task of tasks) {
@@ -430,18 +521,26 @@ Deno.serve(async () => {
         });
         if (insertErr) log(`[sync] "${title}": shopping_list_items insert error: ${JSON.stringify(insertErr)}`);
 
-        // 5. Insert into shopping_list so the item appears in the Shopping List UI
-        if (syncUserId) {
-          const { error: slErr } = await supabase.from("shopping_list").insert({
-            user_id: syncUserId,
+        // 5. Insert into shopping_trip_items under today's trip for this store.
+        //    The user marks the item purchased from the Shopping page Trip
+        //    section, which inserts a shopping_list row with quantity+unit and
+        //    fires the purchase trigger that credits the Pantry.
+        if (tripId) {
+          const pack = parsePackSize(candidate.size_label);
+          const productName = [candidate.brand, candidate.name].filter(Boolean).join(" ").trim() || title;
+          const { error: tiErr } = await supabase.from("shopping_trip_items").insert({
+            shopping_trip_id: tripId,
+            product_name: productName,
             ingredient_name: title,
-            source: "google_tasks",
-            is_checked: false,
+            quantity_purchased: 1,
+            pack_quantity: pack?.qty ?? null,
+            pack_unit: pack?.unit ?? null,
+            store_product_id: candidate.id || null,
           });
-          if (slErr) log(`[sync] "${title}": shopping_list insert error: ${JSON.stringify(slErr)}`);
-          else log(`[sync] "${title}": added to shopping_list for user`);
-        } else {
-          log(`[sync] "${title}": SYNC_USER_ID not set — skipping shopping_list insert`);
+          if (tiErr) log(`[sync] "${title}": shopping_trip_items insert error: ${JSON.stringify(tiErr)}`);
+          else log(`[sync] "${title}": added to shopping_trip_items (trip=${tripId})`);
+        } else if (syncUserId) {
+          log(`[sync] "${title}": no trip available — skipping shopping_trip_items insert`);
         }
 
         // Delete task only after successful processing
