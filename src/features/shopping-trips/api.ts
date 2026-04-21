@@ -22,6 +22,7 @@ interface DbShoppingTrip {
   purchased_at: string;
   notes: string | null;
   created_at: string;
+  completed_at: string | null;
   shopping_trip_items: DbShoppingTripItem[];
 }
 
@@ -49,6 +50,7 @@ function dbTripToDomain(row: DbShoppingTrip): ShoppingTrip {
     purchasedAt: row.purchased_at,
     notes: row.notes ?? undefined,
     createdAt: row.created_at,
+    completedAt: row.completed_at ?? undefined,
     items: (row.shopping_trip_items ?? []).map(dbItemToDomain),
   };
 }

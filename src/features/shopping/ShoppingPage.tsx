@@ -109,7 +109,11 @@ export default function ShoppingPage() {
     setListLoading(true);
     try {
       const trips = await getShoppingTrips();
-      const latest = trips[0];
+      // Prefer the latest OPEN trip (completed_at is null) so Google Tasks
+      // items accumulate into the trip the user is currently shopping for,
+      // even across days. Fall back to the most recent trip if none are open.
+      const latest =
+        trips.find((t: any) => !t.completedAt) ?? trips[0];
       if (!latest) {
         setAggregatedItems([]);
       } else {

@@ -10,7 +10,7 @@
 }
 
 # Keep Gson model classes
--keep class com.joesketo.app.data.models.** { *; }
+-keep class com.dailycatholic.app.data.models.** { *; }
 
 # OkHttp
 -dontwarn okhttp3.**
