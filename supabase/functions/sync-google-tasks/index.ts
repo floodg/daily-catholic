@@ -1,4 +1,11 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// `ReturnType<typeof createClient>` collapses the schema/row generics to `never`
+// in recent supabase-js versions, which propagates as "never" row types to every
+// `.insert()` / `.update()` call. Using the loose client type matches what the
+// actual `createClient(url, key)` call returns at runtime.
+// deno-lint-ignore no-explicit-any
+type AnySupabaseClient = SupabaseClient<any, any, any>;
 
 // Store priority used only for default product selection — not for task list discovery.
 // Task lists are discovered dynamically from Google Tasks (any list name works).
@@ -94,7 +101,7 @@ const deleteTask = async (token: string, listId: string, taskId: string): Promis
 // Bunnings tasks only hit Bunnings products, etc.
 
 const lookupExistingProduct = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: AnySupabaseClient,
   productName: string,
   store: string
 ): Promise<StoreProductRow | null> => {
@@ -111,7 +118,15 @@ const lookupExistingProduct = async (
 
 // --- Claude Enrichment ---
 
-const enrichWithClaude = async (productName: string, store: string, log: (m: string) => void): Promise<GeminiProduct> => {
+// Log callback shared by helpers: accepts an optional severity and structured
+// context so the main handler can persist both to edge_function_logs.
+type LogFn = (
+  msg: string,
+  level?: "debug" | "info" | "warn" | "error",
+  context?: Record<string, unknown> | null,
+) => void;
+
+const enrichWithClaude = async (productName: string, store: string, log: LogFn): Promise<GeminiProduct> => {
   const fallback: GeminiProduct = {
     name: productName,
     brand: null,
@@ -126,10 +141,10 @@ const enrichWithClaude = async (productName: string, store: string, log: (m: str
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) {
-    log(`[claude] ${store} NO API KEY`);
+    log(`[claude] ${store} NO API KEY`, "warn", { store, product_name: productName });
     return fallback;
   }
-  log(`[claude] ${store} calling API for "${productName}"`);
+  log(`[claude] ${store} calling API for "${productName}"`, "info", { store, product_name: productName });
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -163,7 +178,11 @@ Find the best matching product listing on ${store} Australia and return ONLY a J
 
   if (!res.ok) {
     const errText = await res.text();
-    log(`[claude] ${store} HTTP ${res.status}: ${errText.slice(0, 300)}`);
+    log(
+      `[claude] ${store} HTTP ${res.status}: ${errText.slice(0, 300)}`,
+      "error",
+      { store, product_name: productName, status: res.status, body_preview: errText.slice(0, 300) }
+    );
     return fallback;
   }
 
@@ -172,7 +191,7 @@ Find the best matching product listing on ${store} Australia and return ONLY a J
   // Extract the last text block from the response (after tool use)
   const textBlock = [...(data?.content ?? [])].reverse().find((b: any) => b.type === "text");
   const text = textBlock?.text ?? "{}";
-  log(`[claude] ${store} raw text: ${String(text).slice(0, 300)}`);
+  log(`[claude] ${store} raw text: ${String(text).slice(0, 300)}`, "debug", { store, product_name: productName });
 
   try {
     // Extract JSON: try code fence first, then first {...} block
@@ -197,7 +216,11 @@ Find the best matching product listing on ${store} Australia and return ONLY a J
       enriched: true,
     };
   } catch (e) {
-    log(`[claude] ${store} JSON parse error: ${e}`);
+    log(
+      `[claude] ${store} JSON parse error: ${e}`,
+      "error",
+      { store, product_name: productName, error: String(e), raw_preview: String(text).slice(0, 300) }
+    );
     return fallback;
   }
 };
@@ -207,14 +230,18 @@ Find the best matching product listing on ${store} Australia and return ONLY a J
 // If none found, calls Claude to enrich. One candidate per task.
 
 const collectCandidate = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: AnySupabaseClient,
   productName: string,
   store: string,
-  log: (m: string) => void
+  log: LogFn
 ): Promise<Candidate | null> => {
   const cached = await lookupExistingProduct(supabase, productName, store);
   if (cached) {
-    log(`[collect] ${store}: cache hit id=${cached.id} name="${cached.name}"`);
+    log(
+      `[collect] ${store}: cache hit id=${cached.id} name="${cached.name}"`,
+      "info",
+      { store, product_name: productName, store_product_id: cached.id }
+    );
     return { ...cached, price: null, category: null, isNew: false };
   }
 
@@ -238,9 +265,9 @@ const collectCandidate = async (
 // --- Persist New Product ---
 
 const persistCandidate = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: AnySupabaseClient,
   candidate: Candidate,
-  log: (m: string) => void
+  log: LogFn
 ): Promise<Candidate | null> => {
   if (!candidate.isNew) return candidate;
 
@@ -258,12 +285,21 @@ const persistCandidate = async (
     .single();
 
   if (error || !data) {
-    log(`[persist] store_products insert FAILED for "${candidate.name}" (${candidate.store}): ${JSON.stringify(error)}`);
+    log(
+      `[persist] store_products insert FAILED for "${candidate.name}" (${candidate.store}): ${JSON.stringify(error)}`,
+      "error",
+      { store: candidate.store, product_name: candidate.name, table: "store_products", error }
+    );
     return null;
   }
 
-  log(`[persist] store_products inserted id=${(data as { id: string }).id} name="${candidate.name}" store=${candidate.store}`);
-  return { ...candidate, id: (data as { id: string }).id, isNew: false };
+  const insertedId = (data as { id: string }).id;
+  log(
+    `[persist] store_products inserted id=${insertedId} name="${candidate.name}" store=${candidate.store}`,
+    "info",
+    { store: candidate.store, product_name: candidate.name, store_product_id: insertedId }
+  );
+  return { ...candidate, id: insertedId, isNew: false };
 };
 
 // --- Select Default Product ---
@@ -298,7 +334,7 @@ const selectDefault = (candidates: Candidate[]): Candidate | null => {
 // --- Ingredient Resolution ---
 
 const resolveIngredient = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: AnySupabaseClient,
   name: string
 ): Promise<string | null> => {
   const { data: existing } = await supabase
@@ -328,10 +364,10 @@ const resolveIngredient = async (
 // subsequent syncs then create a fresh trip.
 
 const findOrCreateOpenTrip = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: AnySupabaseClient,
   userId: string,
   store: string,
-  log: (m: string) => void
+  log: LogFn
 ): Promise<string | null> => {
   const { data: existing, error: findErr } = await supabase
     .from("shopping_trips")
@@ -344,12 +380,21 @@ const findOrCreateOpenTrip = async (
     .maybeSingle();
 
   if (findErr) {
-    log(`[trip] lookup FAILED for store=${store}: ${JSON.stringify(findErr)}`);
+    log(
+      `[trip] lookup FAILED for store=${store}: ${JSON.stringify(findErr)}`,
+      "error",
+      { store, user_id: userId, table: "shopping_trips", op: "lookup", error: findErr }
+    );
     return null;
   }
   if (existing) {
-    log(`[trip] reusing open trip id=${(existing as { id: string }).id} store=${store}`);
-    return (existing as { id: string }).id;
+    const tripId = (existing as { id: string }).id;
+    log(
+      `[trip] reusing open trip id=${tripId} store=${store}`,
+      "info",
+      { store, user_id: userId, trip_id: tripId, reused: true }
+    );
+    return tripId;
   }
 
   const { data: created, error: insertErr } = await supabase
@@ -364,12 +409,21 @@ const findOrCreateOpenTrip = async (
     .single();
 
   if (insertErr || !created) {
-    log(`[trip] create FAILED for store=${store}: ${JSON.stringify(insertErr)}`);
+    log(
+      `[trip] create FAILED for store=${store}: ${JSON.stringify(insertErr)}`,
+      "error",
+      { store, user_id: userId, table: "shopping_trips", op: "insert", error: insertErr }
+    );
     return null;
   }
 
-  log(`[trip] created trip id=${(created as { id: string }).id} store=${store}`);
-  return (created as { id: string }).id;
+  const newTripId = (created as { id: string }).id;
+  log(
+    `[trip] created trip id=${newTripId} store=${store}`,
+    "info",
+    { store, user_id: userId, trip_id: newTripId, reused: false }
+  );
+  return newTripId;
 };
 
 // --- Pack Size Parsing ---
@@ -403,7 +457,7 @@ const parsePackSize = (sizeLabel: string | null): { qty: number; unit: string } 
 // --- Persist Ingredient Preferences ---
 
 const persistIngredientPreferences = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: AnySupabaseClient,
   ingredientId: string,
   defaultProductId: string,
   alternativeIds: string[]
@@ -428,6 +482,28 @@ const persistIngredientPreferences = async (
   }
 };
 
+// --- Logging ---
+// `log` writes to three sinks:
+//   1. console (so Supabase's built-in function log viewer still picks it up),
+//   2. an in-memory `debugLog` returned in the HTTP response (handy during
+//      local curl-based debugging), and
+//   3. a buffered batch that is flushed to public.edge_function_logs at every
+//      exit point so errors and informational messages survive past the
+//      invocation and are queryable from SQL.
+// The buffer is flushed in a single insert to minimise request overhead; if
+// the flush itself fails we fall back to console.error so the failure is
+// still visible in the Supabase function logs.
+
+const FUNCTION_NAME = "sync-google-tasks";
+type LogLevel = "debug" | "info" | "warn" | "error";
+type LogContext = Record<string, unknown> | null | undefined;
+interface BufferedLog {
+  level: LogLevel;
+  message: string;
+  context: LogContext;
+  at: string;
+}
+
 // --- Main ---
 
 Deno.serve(async () => {
@@ -435,11 +511,43 @@ Deno.serve(async () => {
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+  const runId = crypto.randomUUID();
   const debugLog: string[] = [];
-  const log = (msg: string) => { console.log(msg); debugLog.push(msg); };
+  const dbBuffer: BufferedLog[] = [];
+
+  const log = (msg: string, level: LogLevel = "info", context: LogContext = null) => {
+    console.log(`[${level}] ${msg}`);
+    debugLog.push(msg);
+    dbBuffer.push({ level, message: msg, context: context ?? null, at: new Date().toISOString() });
+  };
+
+  const flushLogs = async () => {
+    if (dbBuffer.length === 0) return;
+    const rows = dbBuffer.splice(0).map(entry => ({
+      function_name: FUNCTION_NAME,
+      run_id: runId,
+      level: entry.level,
+      message: entry.message,
+      context: entry.context,
+      created_at: entry.at,
+    }));
+    const { error } = await supabase.from("edge_function_logs").insert(rows);
+    if (error) {
+      console.error(`[edge_function_logs] flush FAILED: ${JSON.stringify(error)}`);
+    }
+  };
+
+  const respond = async (body: Record<string, unknown>, status = 200) => {
+    await flushLogs();
+    return new Response(JSON.stringify({ run_id: runId, ...body }), { status });
+  };
 
   const syncUserId = Deno.env.get("SYNC_USER_ID") ?? null;
-  log(`[sync] Starting. SUPABASE_URL set=${!!supabaseUrl} SERVICE_KEY set=${!!supabaseServiceKey} SYNC_USER_ID set=${!!syncUserId}`);
+  log(
+    `[sync] Starting. SUPABASE_URL set=${!!supabaseUrl} SERVICE_KEY set=${!!supabaseServiceKey} SYNC_USER_ID set=${!!syncUserId}`,
+    "info",
+    { supabase_url_set: !!supabaseUrl, service_key_set: !!supabaseServiceKey, sync_user_id_set: !!syncUserId }
+  );
 
 
   let token: string | null = null;
@@ -447,20 +555,28 @@ Deno.serve(async () => {
     token = await getAccessToken();
     log("[sync] Google auth OK");
   } catch (e) {
-    log(`[sync] Google auth FAILED: ${e}`);
-    return new Response(JSON.stringify({ ok: false, error: "google_auth_failed", debug: debugLog }), { status: 200 });
+    log(`[sync] Google auth FAILED: ${e}`, "error", { error: String(e) });
+    return respond({ ok: false, error: "google_auth_failed", debug: debugLog });
   }
 
   // Discover all task lists dynamically — supports any store name (Coles, Bunnings, etc.)
   const taskLists = await getAllTaskLists(token);
-  log(`[sync] Found ${taskLists.size} task lists: ${JSON.stringify([...taskLists.keys()])}`);
+  log(
+    `[sync] Found ${taskLists.size} task lists: ${JSON.stringify([...taskLists.keys()])}`,
+    "info",
+    { task_list_count: taskLists.size, task_lists: [...taskLists.keys()] }
+  );
 
   let processed = 0;
   let skipped = 0;
 
   for (const [store, listId] of taskLists) {
     const tasks = await getTasks(token, listId);
-    log(`[sync] ${store} tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`);
+    log(
+      `[sync] ${store} tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`,
+      "info",
+      { store, task_count: tasks.length }
+    );
     if (!Array.isArray(tasks) || tasks.length === 0) continue;
 
     // Resolve (or create) a trip for today scoped to this store. Items below
@@ -470,21 +586,23 @@ Deno.serve(async () => {
     if (syncUserId) {
       tripId = await findOrCreateOpenTrip(supabase, syncUserId, store, log);
     } else {
-      log(`[sync] ${store}: SYNC_USER_ID not set — cannot create shopping trip; items will be enriched only`);
+      log(
+        `[sync] ${store}: SYNC_USER_ID not set — cannot create shopping trip; items will be enriched only`,
+        "warn",
+        { store }
+      );
     }
 
-    let inserted = 0;
-    const errors: string[] = [];
     for (const task of tasks) {
       const title: string = task?.title ?? "";
-      log(`[sync] Processing task: "${title}" (store=${store} id=${task.id})`);
+      log(`[sync] Processing task: "${title}" (store=${store} id=${task.id})`, "info", { store, title, task_id: task.id });
       if (!title) { skipped++; continue; }
 
       try {
         // 1. Lookup existing store_products for this store, or enrich via Claude
         const rawCandidate = await collectCandidate(supabase, title, store, log);
         if (!rawCandidate) {
-          log(`[sync] "${title}": skipping — no candidate found`);
+          log(`[sync] "${title}": skipping — no candidate found`, "warn", { store, title, reason: "no_candidate" });
           skipped++;
           continue;
         }
@@ -492,14 +610,14 @@ Deno.serve(async () => {
         // 2. Persist to store_products if new
         const candidate = await persistCandidate(supabase, rawCandidate, log);
         if (!candidate) {
-          log(`[sync] "${title}": skipping — store_products persist failed`);
+          log(`[sync] "${title}": skipping — store_products persist failed`, "warn", { store, title, reason: "persist_failed" });
           skipped++;
           continue;
         }
 
         // 3. Resolve or create ingredient, then save as default product
         const ingredientId = await resolveIngredient(supabase, title);
-        log(`[sync] "${title}": ingredientId=${ingredientId}`);
+        log(`[sync] "${title}": ingredientId=${ingredientId}`, "info", { store, title, ingredient_id: ingredientId });
         if (ingredientId) {
           await persistIngredientPreferences(supabase, ingredientId, candidate.id, []);
         }
@@ -519,7 +637,13 @@ Deno.serve(async () => {
           source: "google_tasks",
           enriched: true,
         });
-        if (insertErr) log(`[sync] "${title}": shopping_list_items insert error: ${JSON.stringify(insertErr)}`);
+        if (insertErr) {
+          log(
+            `[sync] "${title}": shopping_list_items insert error: ${JSON.stringify(insertErr)}`,
+            "error",
+            { store, title, table: "shopping_list_items", error: insertErr }
+          );
+        }
 
         // 5. Insert into shopping_trip_items under today's trip for this store.
         //    The user marks the item purchased from the Shopping page Trip
@@ -537,23 +661,42 @@ Deno.serve(async () => {
             pack_unit: pack?.unit ?? null,
             store_product_id: candidate.id || null,
           });
-          if (tiErr) log(`[sync] "${title}": shopping_trip_items insert error: ${JSON.stringify(tiErr)}`);
-          else log(`[sync] "${title}": added to shopping_trip_items (trip=${tripId})`);
+          if (tiErr) {
+            log(
+              `[sync] "${title}": shopping_trip_items insert error: ${JSON.stringify(tiErr)}`,
+              "error",
+              { store, title, table: "shopping_trip_items", trip_id: tripId, error: tiErr }
+            );
+          } else {
+            log(
+              `[sync] "${title}": added to shopping_trip_items (trip=${tripId})`,
+              "info",
+              { store, title, trip_id: tripId }
+            );
+          }
         } else if (syncUserId) {
-          log(`[sync] "${title}": no trip available — skipping shopping_trip_items insert`);
+          log(
+            `[sync] "${title}": no trip available — skipping shopping_trip_items insert`,
+            "warn",
+            { store, title, reason: "no_trip" }
+          );
         }
 
         // Delete task only after successful processing
         await deleteTask(token, listId, task.id);
         processed++;
-        log(`[sync] "${title}": processed OK`);
+        log(`[sync] "${title}": processed OK`, "info", { store, title });
       } catch (e) {
-        log(`[sync] "${title}": EXCEPTION: ${e}`);
+        log(
+          `[sync] "${title}": EXCEPTION: ${e}`,
+          "error",
+          { store, title, task_id: task?.id, error: String(e) }
+        );
         skipped++;
       }
     }
   }
 
-  log(`[sync] Done. processed=${processed} skipped=${skipped}`);
-  return new Response(JSON.stringify({ ok: true, processed, skipped, debug: debugLog }), { status: 200 });
+  log(`[sync] Done. processed=${processed} skipped=${skipped}`, "info", { processed, skipped });
+  return respond({ ok: true, processed, skipped, debug: debugLog });
 });
