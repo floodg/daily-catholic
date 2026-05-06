@@ -660,24 +660,40 @@ export default function ShoppingPage() {
                       return (
                         <>
                           <div style={{
-                            fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
+                            fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem', fontWeight: 600,
                             color: 'var(--parchment)',
                             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            marginBottom: hasSecondary ? '0.3rem' : 0,
                           }}>
                             {displayName}
                           </div>
                           {hasSecondary && (
-                            <div style={{
-                              fontFamily: 'DM Sans, sans-serif', fontSize: '0.75rem',
-                              color: 'var(--text-subtle)', marginTop: '0.15rem',
-                              display: 'flex', gap: '0.35rem', alignItems: 'center',
-                            }}>
-                              {brand && <span>{brand}</span>}
-                              {brand && item.quantity && (
-                                <span style={{ opacity: 0.4 }}>·</span>
+                            <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                              {brand && (
+                                <span style={{
+                                  fontSize: '0.7rem',
+                                  fontFamily: 'DM Sans, monospace',
+                                  fontWeight: 600,
+                                  background: 'var(--app-bg)',
+                                  color: 'var(--text-muted)',
+                                  padding: '0.15rem 0.4rem',
+                                  borderRadius: 4,
+                                }}>
+                                  {brand}
+                                </span>
                               )}
                               {item.quantity && (
-                                <span style={{ fontFamily: 'DM Sans, monospace' }}>{item.quantity}</span>
+                                <span style={{
+                                  fontSize: '0.7rem',
+                                  fontFamily: 'DM Sans, monospace',
+                                  fontWeight: 700,
+                                  background: 'var(--app-border)',
+                                  color: 'var(--text-subtle)',
+                                  padding: '0.15rem 0.5rem',
+                                  borderRadius: 999,
+                                }}>
+                                  {item.quantity}
+                                </span>
                               )}
                             </div>
                           )}
