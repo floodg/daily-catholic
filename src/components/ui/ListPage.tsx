@@ -157,9 +157,11 @@ export default function ListPage<T extends ListItem>({
         gap: '1.25rem',
         alignItems: 'start',
         transition: 'grid-template-columns 0.25s ease',
+        minWidth: 0,
+        width: '100%',
       }}>
         {/* List column */}
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div style={{ position: 'relative', marginBottom: '0.875rem' }}>
             <Search size={15} style={{
               position: 'absolute', left: '0.75rem', top: '50%',
@@ -213,7 +215,7 @@ export default function ListPage<T extends ListItem>({
           <div
             className="app-card"
             ref={detailRef}
-            style={{ position: isMobile ? 'static' : 'sticky', top: isMobile ? undefined : '72px', overflow: 'visible' }}
+            style={{ position: isMobile ? 'static' : 'sticky', top: isMobile ? undefined : '72px', overflow: 'visible', minWidth: 0 }}
           >
             <div style={{
               padding: '1rem 1.25rem 0.75rem',
@@ -234,7 +236,10 @@ export default function ListPage<T extends ListItem>({
                 <span style={{
                   fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em',
                   textTransform: 'uppercase', color: 'var(--text-subtle)', fontFamily: 'DM Sans, sans-serif',
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  overflow: 'hidden', display: 'block',
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.25,
                 }}>
                   {panelMode === 'new' ? 'New Item' : (selected?.name ?? 'Details')}
                 </span>

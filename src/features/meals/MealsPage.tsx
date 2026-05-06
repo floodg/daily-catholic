@@ -91,7 +91,7 @@ export default function MealsPage() {
   }
 
   return (
-    <div>
+    <div style={{ width: "100%", minWidth: 0 }}>
       <ListPage<Meal>
         eyebrow="Food Library"
         title="My <em>Meals</em>"
@@ -146,29 +146,67 @@ export default function MealsPage() {
 
 /* ── Meal List Card ──────────────────────────────────────────────────────────── */
 
+/** Puts a trailing "( … )" variant on its own line for cards (e.g. pizza style). */
+function splitMealDisplayName(name: string): { primary: string; subtitle: string | null } {
+  const trimmed = name.trim();
+  const m = trimmed.match(/^(.*?)\s*(\([^)]+\))\s*$/);
+  if (m && m[1].trim()) {
+    return { primary: m[1].trim(), subtitle: m[2].trim() };
+  }
+  return { primary: trimmed, subtitle: null };
+}
+
 function MealCard({ meal, isSelected, onSelect }: {
   meal: Meal;
   isSelected: boolean;
   onSelect: (m: Meal) => void;
 }) {
   const totalMins = (meal.prepTimeMins ?? 0) + (meal.cookTimeMins ?? 0);
+  const { primary, subtitle } = splitMealDisplayName(meal.name);
   return (
     <button
       onClick={() => onSelect(meal)}
-      style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+      style={{ width: "100%", maxWidth: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0, boxSizing: "border-box" }}
     >
       <div className="app-card" style={{
         padding: "0.875rem 1rem",
         borderLeft: isSelected ? "3px solid var(--gold)" : "3px solid transparent",
         background: isSelected ? "rgba(201,168,76,0.05)" : "var(--app-surface)",
         transition: "all 0.15s",
+        maxWidth: "100%",
+        overflow: "hidden",
       }}>
-        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", maxWidth: "100%" }}>
           <span style={{ fontSize: "1.5rem", lineHeight: 1, flexShrink: 0 }}>🍽️</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: "DM Sans, sans-serif", fontWeight: 700, fontSize: "0.9rem", color: "var(--parchment)", marginBottom: "0.25rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {meal.name}
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+            <div style={{
+              fontFamily: "DM Sans, sans-serif", fontWeight: 700, fontSize: "0.9rem", color: "var(--parchment)",
+              marginBottom: subtitle ? "0.2rem" : "0.25rem",
+              lineHeight: 1.3,
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+            }}>
+              {primary}
             </div>
+            {subtitle && (
+              <span style={{
+                display: "inline-block",
+                fontSize: "0.65rem",
+                fontFamily: "DM Sans, monospace",
+                fontWeight: 600,
+                background: "var(--app-bg)",
+                color: "var(--text-muted)",
+                padding: "0.15rem 0.4rem",
+                borderRadius: 4,
+                marginBottom: "0.25rem",
+                maxWidth: "100%",
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
+                lineHeight: 1.25,
+              }}>
+                {subtitle}
+              </span>
+            )}
             {meal.tags && meal.tags.length > 0 && (
               <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", marginBottom: "0.375rem" }}>
                 {meal.tags.slice(0, 3).map(tag => (
@@ -204,6 +242,7 @@ function MealDetail({ meal, onEdit, onDelete }: {
 }) {
   const [selectedIngredient, setSelectedIngredient] = useState<Ingredient | null>(null);
   const handleClosePopup = useCallback(() => setSelectedIngredient(null), []);
+  const { primary, subtitle } = splitMealDisplayName(meal.name);
 
   return (
     <div>
@@ -225,9 +264,33 @@ function MealDetail({ meal, onEdit, onDelete }: {
       {/* Meal identity */}
       <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
         <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>🍽️</div>
-        <h3 style={{ fontFamily: "'Cinzel', serif", fontSize: "1rem", color: "var(--parchment)", margin: "0 0 0.5rem", letterSpacing: "0.04em" }}>
-          {meal.name}
+        <h3 style={{
+          fontFamily: "'Cinzel', serif", fontSize: "1rem", color: "var(--parchment)",
+          margin: "0 0 0.35rem", letterSpacing: "0.04em", lineHeight: 1.35,
+          overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%", padding: "0 0.25rem", boxSizing: "border-box",
+        }}>
+          {primary}
         </h3>
+        {subtitle && (
+          <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.5rem", padding: "0 0.25rem" }}>
+            <span style={{
+              fontSize: "0.65rem",
+              fontFamily: "DM Sans, monospace",
+              fontWeight: 600,
+              background: "var(--app-bg)",
+              color: "var(--text-muted)",
+              padding: "0.2rem 0.5rem",
+              borderRadius: 4,
+              lineHeight: 1.25,
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+              maxWidth: "100%",
+              textAlign: "center",
+            }}>
+              {subtitle}
+            </span>
+          </div>
+        )}
         {meal.tags && meal.tags.length > 0 && (
           <div style={{ display: "flex", gap: "0.375rem", justifyContent: "center", flexWrap: "wrap" }}>
             {meal.tags.map(tag => (
@@ -268,10 +331,19 @@ function MealDetail({ meal, onEdit, onDelete }: {
               <div
                 key={ing.id}
                 onClick={() => hasProducts && setSelectedIngredient(ing)}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.4rem 0.625rem", background: "var(--app-bg)", borderRadius: 8, fontSize: "0.85rem", fontFamily: "DM Sans, sans-serif", marginBottom: "0.25rem", cursor: hasProducts ? "pointer" : "default" }}
+                style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+                  gap: "0.5rem", padding: "0.4rem 0.625rem", background: "var(--app-bg)", borderRadius: 8,
+                  fontSize: "0.85rem", fontFamily: "DM Sans, sans-serif", marginBottom: "0.25rem",
+                  cursor: hasProducts ? "pointer" : "default",
+                  maxWidth: "100%",
+                }}
                 title={hasProducts ? "Click to view product options" : undefined}
               >
-                <span style={{ color: "var(--parchment)", fontWeight: 500 }}>
+                <span style={{
+                  color: "var(--parchment)", fontWeight: 500, flex: 1, minWidth: 0,
+                  overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.35,
+                }}>
                   {ing.name}
                   {ing.pantryStaple && (
                     <span style={{ marginLeft: "0.5rem", fontSize: "0.65rem", color: "#8ab4a0", background: "rgba(138,180,160,0.12)", border: "1px solid rgba(138,180,160,0.25)", padding: "0.05rem 0.3rem", borderRadius: "0.25rem" }}>
@@ -280,7 +352,7 @@ function MealDetail({ meal, onEdit, onDelete }: {
                   )}
                   {hasProducts && <span style={{ marginLeft: "0.375rem", fontSize: "0.85rem" }}>🛒</span>}
                 </span>
-                {qtyLabel && <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{qtyLabel}</span>}
+                {qtyLabel && <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", flexShrink: 0, whiteSpace: "nowrap" }}>{qtyLabel}</span>}
               </div>
             );
           })}
