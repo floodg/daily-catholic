@@ -16,6 +16,10 @@ export interface PurchasedShoppingItem {
   netQtyNeeded?: number;
   source: string;
   createdAt: string;
+  /** When set, links to trip line item for product name / brand resolution */
+  shoppingTripItemId?: string | null;
+  /** Set when the linked trip has `completed_at` — hidden from Done; still counted for suppressing trip lines */
+  tripCompletedAt?: string | null;
 }
 
 export async function fetchAggregatedShoppingListForThisWeek(): Promise<AggregatedShoppingItem[]> {
@@ -65,7 +69,7 @@ export async function markAggregatedItemPurchased(
         source: 'meal_plan',
       },
     ])
-    .select('id, ingredient_name, unit, requested_quantity, source, created_at')
+    .select('id, ingredient_name, unit, requested_quantity, source, created_at, shopping_trip_item_id')
     .single();
   if (error) throw error;
 
@@ -77,6 +81,8 @@ export async function markAggregatedItemPurchased(
     netQtyNeeded: (row.requested_quantity as number | null) ?? undefined,
     source: row.source as string,
     createdAt: row.created_at as string,
+    shoppingTripItemId: (row.shopping_trip_item_id as string | null) ?? null,
+    tripCompletedAt: null,
   };
 }
 
@@ -87,20 +93,42 @@ export async function fetchPurchasedShoppingItems(): Promise<PurchasedShoppingIt
 
   const { data, error } = await supabase
     .from('shopping_list')
-    .select('id, ingredient_name, unit, requested_quantity, source, created_at')
+    .select(`
+      id,
+      ingredient_name,
+      unit,
+      requested_quantity,
+      source,
+      created_at,
+      shopping_trip_item_id,
+      shopping_trip_items (
+        shopping_trips (
+          completed_at
+        )
+      )
+    `)
     .eq('user_id', user.id)
     .eq('is_checked', true)
     .order('created_at', { ascending: false });
   if (error) throw error;
 
-  return (data as any[]).map(row => ({
-    id: row.id as string,
-    displayName: row.ingredient_name as string,
-    unit: (row.unit as MeasurementUnitCode | null) ?? undefined,
-    netQtyNeeded: (row.requested_quantity as number | null) ?? undefined,
-    source: row.source as string,
-    createdAt: row.created_at as string,
-  }));
+  return (data as any[]).map((row) => {
+    const sti = row.shopping_trip_items as
+      | { shopping_trips: { completed_at: string | null } | null }
+      | null
+      | undefined;
+    const tripCompletedAt = sti?.shopping_trips?.completed_at ?? null;
+    return {
+      id: row.id as string,
+      displayName: row.ingredient_name as string,
+      unit: (row.unit as MeasurementUnitCode | null) ?? undefined,
+      netQtyNeeded: (row.requested_quantity as number | null) ?? undefined,
+      source: row.source as string,
+      createdAt: row.created_at as string,
+      shoppingTripItemId: (row.shopping_trip_item_id as string | null) ?? null,
+      tripCompletedAt,
+    };
+  });
 }
 
 // ─── Pending (Google Tasks) items ─────────────────────────────────────────────
