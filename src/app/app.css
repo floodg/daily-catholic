@@ -27,6 +27,7 @@
 .app-shell {
   display: flex;
   min-height: 100vh;
+  min-width: 0;
   background: var(--app-bg);
 }
 
@@ -46,6 +47,7 @@
 .app-main {
   margin-left: var(--sidebar-w);
   flex: 1;
+  min-width: 0; /* allow shrinking so wide list rows don’t clip on narrow viewports */
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -69,6 +71,7 @@
   padding: 2rem;
   max-width: 1200px;
   width: 100%;
+  min-width: 0;
 }
 
 /* ── Sidebar Internals ──────────────────────────────────────────────────── */

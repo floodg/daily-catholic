@@ -74,7 +74,10 @@ function ShoppingTripItemLabels({
     <>
       <div style={{
         fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem', fontWeight: 600,
-        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        lineHeight: 1.3,
+        minWidth: 0,
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
         marginBottom: hasSecondary ? '0.3rem' : 0,
         ...titleStyle,
       }}>
@@ -529,7 +532,7 @@ export default function ShoppingPage() {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto' }}>
+    <div style={{ maxWidth: 600, width: '100%', margin: '0 auto', boxSizing: 'border-box', minWidth: 0 }}>
 
       {/* Page header */}
       <div className="page-header-bar">
@@ -712,11 +715,12 @@ export default function ShoppingPage() {
                 <div
                   key={item.id}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
                     padding: '0.875rem 1rem',
                     borderBottom: idx < filteredAggregatedItems.length - 1
                       ? '1px solid var(--app-border)'
                       : 'none',
+                    maxWidth: '100%',
                   }}
                 >
                   <button
@@ -725,12 +729,13 @@ export default function ShoppingPage() {
                       background: 'none', border: 'none', cursor: 'pointer',
                       padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center',
                       color: 'var(--app-border-strong)', transition: 'color 0.15s',
+                      marginTop: 2,
                     }}
                     aria-label="Mark as purchased"
                   >
                     <Circle size={26} />
                   </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                     <ShoppingTripItemLabels
                       tripItemId={item.id}
                       fallbackName={item.name}
@@ -745,6 +750,7 @@ export default function ShoppingPage() {
                       background: 'none', border: 'none', cursor: 'pointer',
                       padding: '0.25rem', flexShrink: 0, display: 'flex', alignItems: 'center',
                       opacity: 0.8,
+                      marginTop: 2,
                       transition: 'opacity 0.15s', fontSize: '0.85rem',
                     }}
                     aria-label="Swap product"
@@ -802,9 +808,10 @@ export default function ShoppingPage() {
                 <div
                   key={item.id}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
                     padding: '0.875rem 1rem',
                     borderBottom: idx < pendingItems.length - 1 ? '1px solid var(--app-border)' : 'none',
+                    maxWidth: '100%',
                   }}
                 >
                   <button
@@ -813,16 +820,19 @@ export default function ShoppingPage() {
                       background: 'none', border: 'none', cursor: 'pointer',
                       padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center',
                       color: 'var(--app-border-strong)', transition: 'color 0.15s',
+                      marginTop: 2,
                     }}
                     aria-label="Mark as purchased"
                   >
                     <Circle size={26} />
                   </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                     <div style={{
                       fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
                       color: 'var(--parchment)',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      lineHeight: 1.3,
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-word',
                     }}>
                       {item.ingredientName}
                     </div>
@@ -834,6 +844,7 @@ export default function ShoppingPage() {
                       padding: '0.25rem', flexShrink: 0, display: 'flex',
                       alignItems: 'center', color: 'var(--text-subtle)',
                       opacity: 0.5, transition: 'opacity 0.15s',
+                      marginTop: 2,
                     }}
                     aria-label="Remove item"
                     onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
@@ -889,11 +900,12 @@ export default function ShoppingPage() {
                 <div
                   key={item.id}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
                     padding: '0.875rem 1rem',
                     borderBottom: idx < manualItems.length - 1 ? '1px solid var(--app-border)' : 'none',
                     background: item.checked ? 'rgba(255,255,255,0.02)' : 'transparent',
                     transition: 'background 0.15s',
+                    maxWidth: '100%',
                   }}
                 >
                   <button
@@ -903,18 +915,21 @@ export default function ShoppingPage() {
                       padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center',
                       color: item.checked ? 'var(--protein-color)' : 'var(--app-border-strong)',
                       transition: 'color 0.15s',
+                      marginTop: 2,
                     }}
                     aria-label={item.checked ? 'Uncheck' : 'Check'}
                   >
                     {item.checked ? <CheckCircle2 size={26} /> : <Circle size={26} />}
                   </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                     <div style={{
                       fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
                       color: item.checked ? 'var(--text-subtle)' : 'var(--parchment)',
                       textDecoration: item.checked ? 'line-through' : 'none',
                       transition: 'all 0.15s',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      lineHeight: 1.3,
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-word',
                     }}>
                       {item.name}
                     </div>
@@ -926,6 +941,7 @@ export default function ShoppingPage() {
                       padding: '0.25rem', flexShrink: 0, display: 'flex',
                       alignItems: 'center', color: 'var(--text-subtle)',
                       opacity: 0.5, transition: 'opacity 0.15s',
+                      marginTop: 2,
                     }}
                     aria-label="Remove item"
                     onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
@@ -980,19 +996,21 @@ export default function ShoppingPage() {
                 <div
                   key={p.id}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
                     padding: '0.875rem 1rem',
                     borderBottom: idx < purchasedItemsForDone.length - 1 ? '1px solid var(--app-border)' : 'none',
                     background: 'rgba(138,180,160,0.05)',
+                    maxWidth: '100%',
                   }}
                 >
                   <span style={{
                     display: 'flex', alignItems: 'center',
                     color: 'var(--protein-color)', flexShrink: 0,
+                    marginTop: 2,
                   }}>
                     <CheckCircle2 size={26} />
                   </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                     <ShoppingTripItemLabels
                       tripItemId={p.shoppingTripItemId}
                       fallbackName={p.displayName}
@@ -1008,7 +1026,7 @@ export default function ShoppingPage() {
                   <button
                     onClick={() => handleUnmarkPurchased(p.id)}
                     className="btn-app-ghost"
-                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.6rem', flexShrink: 0 }}
+                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.6rem', flexShrink: 0, marginTop: 2 }}
                   >
                     Unmark
                   </button>
