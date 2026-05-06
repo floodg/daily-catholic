@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Trash2, CheckCircle2, Circle, ShoppingCart, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
-import type { ShoppingItem } from "../../domain/types";
+import type { ShoppingItem, ShoppingTrip } from "../../domain/types";
 import { formatQuantity, isUnmeasuredQuantity, toBaseUnit } from "./quantityUtils";
 import { v4 as uuidv4 } from "../../storage/uuid";
 import { formatDateLocal, getMondayLocal } from "../../lib/dateUtils";
@@ -35,6 +36,82 @@ function parseProductBaseSize(product: IngredientProductPreference): { qty: numb
   if (unit === 'ml') return { qty: size, unit: 'ml' };
   if (unit === 'units') return { qty: size, unit: 'units' };
   return null;
+}
+
+/**
+ * Prefer an open trip that still has line items. After a trip completes, sync may
+ * create a newer empty open trip; choosing it would hide all items until Unmark.
+ */
+function selectShoppingTripForList(trips: ShoppingTrip[]): ShoppingTrip | null {
+  if (!trips.length) return null;
+  const open = trips.filter((t) => !t.completedAt);
+  const openWithItems = open.filter((t) => (t.items?.length ?? 0) > 0);
+  if (openWithItems.length > 0) return openWithItems[0];
+  if (open.length > 0) return open[0];
+  const withItems = trips.filter((t) => (t.items?.length ?? 0) > 0);
+  if (withItems.length > 0) return withItems[0];
+  return trips[0];
+}
+
+function ShoppingTripItemLabels({
+  tripItemId,
+  fallbackName,
+  quantityLabel,
+  alternativesByItemId,
+  titleStyle,
+}: {
+  tripItemId: string | null | undefined;
+  fallbackName: string;
+  quantityLabel?: string | null;
+  alternativesByItemId: Map<string, IngredientProductPreference[]>;
+  titleStyle: CSSProperties;
+}) {
+  const currentProduct = tripItemId ? alternativesByItemId.get(tripItemId)?.[0] : undefined;
+  const displayName = currentProduct?.name ?? fallbackName;
+  const brand = currentProduct?.brand;
+  const hasSecondary = Boolean(brand || quantityLabel);
+  return (
+    <>
+      <div style={{
+        fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem', fontWeight: 600,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        marginBottom: hasSecondary ? '0.3rem' : 0,
+        ...titleStyle,
+      }}>
+        {displayName}
+      </div>
+      {hasSecondary && (
+        <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {brand && (
+            <span style={{
+              fontSize: '0.7rem',
+              fontFamily: 'DM Sans, monospace',
+              fontWeight: 600,
+              background: 'var(--app-bg)',
+              color: 'var(--text-muted)',
+              padding: '0.15rem 0.4rem',
+              borderRadius: 4,
+            }}>
+              {brand}
+            </span>
+          )}
+          {quantityLabel && (
+            <span style={{
+              fontSize: '0.7rem',
+              fontFamily: 'DM Sans, monospace',
+              fontWeight: 700,
+              background: 'var(--app-border)',
+              color: 'var(--text-subtle)',
+              padding: '0.15rem 0.5rem',
+              borderRadius: 999,
+            }}>
+              {quantityLabel}
+            </span>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 type SectionKey = 'trip' | 'tasks' | 'manual' | 'done';
@@ -105,15 +182,17 @@ export default function ShoppingPage() {
     return set;
   }, [purchasedItems]);
 
+  /** Checked items from the in-progress trip only; completed trips stay in DB for pantry but leave Done */
+  const purchasedItemsForDone = useMemo(
+    () => purchasedItems.filter((p) => !p.tripCompletedAt),
+    [purchasedItems],
+  );
+
   const generateShoppingList = async () => {
     setListLoading(true);
     try {
       const trips = await getShoppingTrips();
-      // Prefer the latest OPEN trip (completed_at is null) so Google Tasks
-      // items accumulate into the trip the user is currently shopping for,
-      // even across days. Fall back to the most recent trip if none are open.
-      const latest =
-        trips.find((t: any) => !t.completedAt) ?? trips[0];
+      const latest = selectShoppingTripForList(trips);
       if (!latest) {
         setAggregatedItems([]);
       } else {
@@ -334,8 +413,8 @@ export default function ShoppingPage() {
   const tripStore = filteredAggregatedItems[0]?.store ?? aggregatedItems[0]?.store;
   const checkedManual = manualItems.filter(i => i.checked).length;
   const allManualDone = manualItems.length > 0 && checkedManual === manualItems.length;
-  const totalItems = filteredAggregatedItems.length + manualItems.length + pendingItems.length + purchasedItems.length;
-  const doneCount = purchasedItems.length + checkedManual;
+  const totalItems = filteredAggregatedItems.length + manualItems.length + pendingItems.length + purchasedItemsForDone.length;
+  const doneCount = purchasedItemsForDone.length + checkedManual;
   const pct = totalItems === 0 ? 0 : Math.round((doneCount / totalItems) * 100);
   const isTripCollapsed = collapsedSections.has('trip');
   const isTasksCollapsed = collapsedSections.has('tasks');
@@ -652,54 +731,13 @@ export default function ShoppingPage() {
                     <Circle size={26} />
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {(() => {
-                      const currentProduct = alternativesByItemId.get(item.id)?.[0];
-                      const displayName = currentProduct?.name ?? item.name;
-                      const brand = currentProduct?.brand;
-                      const hasSecondary = brand || item.quantity;
-                      return (
-                        <>
-                          <div style={{
-                            fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem', fontWeight: 600,
-                            color: 'var(--parchment)',
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                            marginBottom: hasSecondary ? '0.3rem' : 0,
-                          }}>
-                            {displayName}
-                          </div>
-                          {hasSecondary && (
-                            <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                              {brand && (
-                                <span style={{
-                                  fontSize: '0.7rem',
-                                  fontFamily: 'DM Sans, monospace',
-                                  fontWeight: 600,
-                                  background: 'var(--app-bg)',
-                                  color: 'var(--text-muted)',
-                                  padding: '0.15rem 0.4rem',
-                                  borderRadius: 4,
-                                }}>
-                                  {brand}
-                                </span>
-                              )}
-                              {item.quantity && (
-                                <span style={{
-                                  fontSize: '0.7rem',
-                                  fontFamily: 'DM Sans, monospace',
-                                  fontWeight: 700,
-                                  background: 'var(--app-border)',
-                                  color: 'var(--text-subtle)',
-                                  padding: '0.15rem 0.5rem',
-                                  borderRadius: 999,
-                                }}>
-                                  {item.quantity}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
+                    <ShoppingTripItemLabels
+                      tripItemId={item.id}
+                      fallbackName={item.name}
+                      quantityLabel={item.quantity}
+                      alternativesByItemId={alternativesByItemId}
+                      titleStyle={{ color: 'var(--parchment)' }}
+                    />
                   </div>
                   <button
                     onClick={() => setSwappingItem(item)}
@@ -903,7 +941,7 @@ export default function ShoppingPage() {
       )}
 
       {/* ── Done section ──────────────────────────────────────────────────── */}
-      {!listLoading && !hideChecked && purchasedItems.length > 0 && (
+      {!listLoading && !hideChecked && purchasedItemsForDone.length > 0 && (
         <div style={{ marginBottom: '0.75rem' }}>
           <button
             onClick={() => toggleSection('done')}
@@ -928,7 +966,7 @@ export default function ShoppingPage() {
               color: 'var(--protein-color)', background: 'rgba(138,180,160,0.12)',
               padding: '0.15rem 0.5rem', borderRadius: 100,
             }}>
-              {purchasedItems.length}
+              {purchasedItemsForDone.length}
             </span>
             {isDoneCollapsed
               ? <ChevronRight size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
@@ -938,13 +976,13 @@ export default function ShoppingPage() {
 
           {!isDoneCollapsed && (
             <div className="app-card" style={{ overflow: 'hidden' }}>
-              {purchasedItems.map((p, idx) => (
+              {purchasedItemsForDone.map((p, idx) => (
                 <div
                   key={p.id}
                   style={{
                     display: 'flex', alignItems: 'center', gap: '0.75rem',
                     padding: '0.875rem 1rem',
-                    borderBottom: idx < purchasedItems.length - 1 ? '1px solid var(--app-border)' : 'none',
+                    borderBottom: idx < purchasedItemsForDone.length - 1 ? '1px solid var(--app-border)' : 'none',
                     background: 'rgba(138,180,160,0.05)',
                   }}
                 >
@@ -955,21 +993,17 @@ export default function ShoppingPage() {
                     <CheckCircle2 size={26} />
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
-                      color: 'var(--text-subtle)', textDecoration: 'line-through',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
-                      {p.displayName}
-                    </div>
-                    {p.unit && p.netQtyNeeded != null && (
-                      <div style={{
-                        fontFamily: 'DM Sans, monospace', fontSize: '0.75rem',
-                        color: 'var(--text-muted)', marginTop: '0.1rem',
-                      }}>
-                        {formatQuantity(p.netQtyNeeded, p.unit)}
-                      </div>
-                    )}
+                    <ShoppingTripItemLabels
+                      tripItemId={p.shoppingTripItemId}
+                      fallbackName={p.displayName}
+                      quantityLabel={
+                        p.unit != null && p.netQtyNeeded != null
+                          ? formatQuantity(p.netQtyNeeded, p.unit)
+                          : null
+                      }
+                      alternativesByItemId={alternativesByItemId}
+                      titleStyle={{ color: 'var(--text-subtle)', textDecoration: 'line-through' }}
+                    />
                   </div>
                   <button
                     onClick={() => handleUnmarkPurchased(p.id)}
