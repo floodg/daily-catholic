@@ -652,21 +652,38 @@ export default function ShoppingPage() {
                     <Circle size={26} />
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
-                      color: 'var(--parchment)',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
-                      {item.name}
-                    </div>
-                    {item.quantity && (
-                      <div style={{
-                        fontFamily: 'DM Sans, monospace', fontSize: '0.75rem',
-                        color: 'var(--text-muted)', marginTop: '0.1rem',
-                      }}>
-                        {item.quantity}
-                      </div>
-                    )}
+                    {(() => {
+                      const currentProduct = alternativesByItemId.get(item.id)?.[0];
+                      const displayName = currentProduct?.name ?? item.name;
+                      const brand = currentProduct?.brand;
+                      const hasSecondary = brand || item.quantity;
+                      return (
+                        <>
+                          <div style={{
+                            fontFamily: 'DM Sans, sans-serif', fontSize: '1rem', fontWeight: 500,
+                            color: 'var(--parchment)',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {displayName}
+                          </div>
+                          {hasSecondary && (
+                            <div style={{
+                              fontFamily: 'DM Sans, sans-serif', fontSize: '0.75rem',
+                              color: 'var(--text-subtle)', marginTop: '0.15rem',
+                              display: 'flex', gap: '0.35rem', alignItems: 'center',
+                            }}>
+                              {brand && <span>{brand}</span>}
+                              {brand && item.quantity && (
+                                <span style={{ opacity: 0.4 }}>·</span>
+                              )}
+                              {item.quantity && (
+                                <span style={{ fontFamily: 'DM Sans, monospace' }}>{item.quantity}</span>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                   <button
                     onClick={() => setSwappingItem(item)}
