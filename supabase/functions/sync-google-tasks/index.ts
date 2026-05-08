@@ -11,6 +11,13 @@ type AnySupabaseClient = SupabaseClient<any, any, any>;
 // Task lists are discovered dynamically from Google Tasks (any list name works).
 const STORE_PRIORITY = ["Coles", "Woolworths", "Aldi"];
 const COLES_BRAND_PATTERN = /^coles\b/i;
+const DEFAULT_STORE_NAME_MAP: Record<string, string> = {
+  coles: "Coles",
+  woolworths: "Woolworths",
+  woolies: "Woolworths",
+  aldi: "Aldi",
+  iga: "IGA",
+};
 
 // --- Types ---
 
@@ -87,6 +94,37 @@ const getTasks = async (token: string, listId: string): Promise<any[]> => {
   if (!res.ok) return [];
   const data = await res.json();
   return data.items ?? [];
+};
+
+const buildStoreAliasMap = (log: LogFn): Record<string, string> => {
+  const configured = Deno.env.get("STORE_LIST_ALIASES_JSON");
+  if (!configured) return DEFAULT_STORE_NAME_MAP;
+
+  try {
+    const parsed = JSON.parse(configured) as Record<string, unknown>;
+    const aliases: Record<string, string> = {};
+    for (const [rawKey, rawValue] of Object.entries(parsed)) {
+      const key = rawKey.trim().toLowerCase();
+      const value = typeof rawValue === "string" ? rawValue.trim() : "";
+      if (!key || !value) continue;
+      aliases[key] = value;
+    }
+    return { ...DEFAULT_STORE_NAME_MAP, ...aliases };
+  } catch (error) {
+    log(
+      `[sync] Invalid STORE_LIST_ALIASES_JSON; using defaults: ${String(error)}`,
+      "warn",
+      { error: String(error) }
+    );
+    return DEFAULT_STORE_NAME_MAP;
+  }
+};
+
+const normalizeStoreName = (listTitle: string, storeNameMap: Record<string, string>): string => {
+  const trimmed = listTitle.trim();
+  if (!trimmed) return listTitle;
+  const mapped = storeNameMap[trimmed.toLowerCase()];
+  return mapped ?? trimmed;
 };
 
 const deleteTask = async (token: string, listId: string, taskId: string): Promise<void> => {
@@ -225,6 +263,118 @@ Find the best matching product listing on ${store} Australia and return ONLY a J
   }
 };
 
+// --- Gemini Enrichment (Fallback) ---
+// Uses the Gemini REST API via generativelanguage.googleapis.com.
+// Only used as a fallback when Claude enrichment is unavailable/unhelpful.
+
+const GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview";
+
+const enrichWithGemini = async (productName: string, store: string, log: LogFn): Promise<GeminiProduct> => {
+  const fallback: GeminiProduct = {
+    name: productName,
+    brand: null,
+    price: null,
+    unit: null,
+    url: null,
+    image_url: null,
+    category: null,
+    store,
+    enriched: false,
+  };
+
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) {
+    log(`[gemini] ${store} NO API KEY`, "debug", { store, product_name: productName });
+    return fallback;
+  }
+
+  const model = Deno.env.get("GEMINI_MODEL")?.trim() || GEMINI_DEFAULT_MODEL;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+
+  log(`[gemini] ${store} calling API for "${productName}" (model=${model})`, "info", {
+    store,
+    product_name: productName,
+    model,
+  });
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{
+          text: `Search the web (from your training + browsing capabilities if available) for a product listing on ${store} Australia matching: ${productName}.
+
+Return ONLY a JSON object (no markdown/backticks/explanations) in this exact shape:
+{
+  "name": "full product name as listed",
+  "brand": "brand name or null",
+  "price": 3.50,
+  "unit": "pack size or weight e.g. 500g, 6 pack",
+  "url": "direct product URL on the store website if found, otherwise null",
+  "image_url": "product image URL or null",
+  "category": "e.g. Cleaning, Dairy, Bakery, Pantry"
+}`,
+        }],
+      }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 2048,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    log(
+      `[gemini] ${store} HTTP ${res.status}: ${errText.slice(0, 300)}`,
+      "error",
+      { store, product_name: productName, status: res.status, body_preview: errText.slice(0, 300) }
+    );
+    return fallback;
+  }
+
+  const data = await res.json();
+  const text =
+    data?.candidates?.[0]?.content?.parts?.find((p: any) => typeof p?.text === "string")?.text
+    ?? "{}";
+  log(`[gemini] ${store} raw text: ${String(text).slice(0, 300)}`, "debug", { store, product_name: productName });
+
+  try {
+    let jsonStr = String(text);
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) {
+      jsonStr = fenceMatch[1];
+    } else {
+      const objMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (objMatch) jsonStr = objMatch[0];
+    }
+    const parsed = JSON.parse(jsonStr.trim());
+    return {
+      name: String(parsed.name ?? productName).trim(),
+      brand: parsed.brand ? String(parsed.brand).trim() : null,
+      price: typeof parsed.price === "number" ? parsed.price : null,
+      unit: parsed.unit ? String(parsed.unit).trim() : null,
+      url: parsed.url ? String(parsed.url).trim() : null,
+      image_url: parsed.image_url ? String(parsed.image_url).trim() : null,
+      category: parsed.category ? String(parsed.category).trim() : null,
+      store,
+      enriched: true,
+    };
+  } catch (e) {
+    log(
+      `[gemini] ${store} JSON parse error: ${e}`,
+      "error",
+      { store, product_name: productName, error: String(e), raw_preview: String(text).slice(0, 300) }
+    );
+    return fallback;
+  }
+};
+
 // --- Collect Candidate ---
 // Looks up an existing store_products row for this store first.
 // If none found, calls Claude to enrich. One candidate per task.
@@ -245,7 +395,13 @@ const collectCandidate = async (
     return { ...cached, price: null, category: null, isNew: false };
   }
 
-  const enriched = await enrichWithClaude(productName, store, log);
+  // Prefer Claude (has explicit web_search tool), but fall back to Gemini when
+  // Claude is unavailable (e.g. missing key / insufficient credits).
+  let enriched = await enrichWithClaude(productName, store, log);
+  if (!enriched.enriched) {
+    const gemini = await enrichWithGemini(productName, store, log);
+    if (gemini.enriched) enriched = gemini;
+  }
   if (!enriched.enriched) return null;
 
   return {
@@ -543,6 +699,7 @@ Deno.serve(async () => {
   };
 
   const syncUserId = Deno.env.get("SYNC_USER_ID") ?? null;
+  const storeNameMap = buildStoreAliasMap(log);
   log(
     `[sync] Starting. SUPABASE_URL set=${!!supabaseUrl} SERVICE_KEY set=${!!supabaseServiceKey} SYNC_USER_ID set=${!!syncUserId}`,
     "info",
@@ -570,12 +727,13 @@ Deno.serve(async () => {
   let processed = 0;
   let skipped = 0;
 
-  for (const [store, listId] of taskLists) {
+  for (const [listTitle, listId] of taskLists) {
+    const store = normalizeStoreName(listTitle, storeNameMap);
     const tasks = await getTasks(token, listId);
     log(
-      `[sync] ${store} tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`,
+      `[sync] ${store} (list="${listTitle}") tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`,
       "info",
-      { store, task_count: tasks.length }
+      { store, list_title: listTitle, task_count: tasks.length }
     );
     if (!Array.isArray(tasks) || tasks.length === 0) continue;
 

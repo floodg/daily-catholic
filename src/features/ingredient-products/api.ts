@@ -9,7 +9,7 @@ interface DbStoreProduct {
   brand: string | null;
   size_label: string | null;
   store: string;
-  product_url: string;
+  product_url: string | null;
   image_url: string | null;
 }
 
