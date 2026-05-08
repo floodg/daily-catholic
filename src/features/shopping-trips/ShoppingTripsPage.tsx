@@ -848,6 +848,8 @@ export default function ShoppingTripsPage() {
 
   const productAlternativesMap = buildProductAlternativesMap(meals);
   const totalItems = trips.reduce((sum, t) => sum + t.items.length, 0);
+  const openTrips = trips.filter(t => !t.completedAt);
+  const completedTrips = trips.filter(t => !!t.completedAt);
 
   const handleNewTripSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1010,17 +1012,75 @@ export default function ShoppingTripsPage() {
           </p>
         </div>
       ) : (
-        trips.map(trip => (
-          <TripCard
-            key={trip.id}
-            trip={trip}
-            onUpdate={handleTripUpdated}
-            onDelete={handleTripDeleted}
-            storeProducts={storeProducts}
-            meals={meals}
-            productAlternativesMap={productAlternativesMap}
-          />
-        ))
+        <div>
+          <div style={{ marginBottom: '0.5rem' }}>
+            <div style={{
+              fontFamily: 'DM Sans, sans-serif',
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--text-muted)',
+              marginBottom: '0.5rem',
+              padding: '0 0.25rem',
+            }}>
+              Open Trips ({openTrips.length})
+            </div>
+            {openTrips.length === 0 ? (
+              <div className="app-card" style={{ padding: '1rem 1.125rem', marginBottom: '1rem' }}>
+                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  No open trips.
+                </p>
+              </div>
+            ) : (
+              openTrips.map(trip => (
+                <TripCard
+                  key={trip.id}
+                  trip={trip}
+                  onUpdate={handleTripUpdated}
+                  onDelete={handleTripDeleted}
+                  storeProducts={storeProducts}
+                  meals={meals}
+                  productAlternativesMap={productAlternativesMap}
+                />
+              ))
+            )}
+          </div>
+
+          <div>
+            <div style={{
+              fontFamily: 'DM Sans, sans-serif',
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--text-muted)',
+              marginBottom: '0.5rem',
+              padding: '0 0.25rem',
+            }}>
+              Completed Trips ({completedTrips.length})
+            </div>
+            {completedTrips.length === 0 ? (
+              <div className="app-card" style={{ padding: '1rem 1.125rem' }}>
+                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  No completed trips yet.
+                </p>
+              </div>
+            ) : (
+              completedTrips.map(trip => (
+                <TripCard
+                  key={trip.id}
+                  trip={trip}
+                  onUpdate={handleTripUpdated}
+                  onDelete={handleTripDeleted}
+                  storeProducts={storeProducts}
+                  meals={meals}
+                  productAlternativesMap={productAlternativesMap}
+                />
+              ))
+            )}
+          </div>
+        </div>
       )}
 
       <div style={{ height: '2rem' }} />
