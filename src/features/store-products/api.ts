@@ -9,7 +9,7 @@ interface DbStoreProduct {
   brand: string | null;
   size_label: string | null;
   store: string;
-  product_url: string;
+  product_url: string | null;
   image_url: string | null;
   created_at: string;
 }
@@ -35,7 +35,6 @@ export async function getStoreProducts(): Promise<StoreProduct[]> {
   const { data, error } = await supabase
     .from('store_products')
     .select('*')
-    .not('product_url', 'is', null)
     .order('name', { ascending: true });
 
   if (error) throw error;
@@ -52,7 +51,7 @@ export async function createStoreProduct(
       brand: product.brand ?? null,
       size_label: product.sizeLabel ?? null,
       store: product.store,
-      product_url: product.productUrl,
+      product_url: product.productUrl?.trim() || null,
       image_url: product.imageUrl ?? null,
     })
     .select()
@@ -72,7 +71,7 @@ export async function updateStoreProduct(
       brand: product.brand ?? null,
       size_label: product.sizeLabel ?? null,
       store: product.store,
-      product_url: product.productUrl,
+      product_url: product.productUrl?.trim() || null,
       image_url: product.imageUrl ?? null,
     })
     .eq('id', product.id)

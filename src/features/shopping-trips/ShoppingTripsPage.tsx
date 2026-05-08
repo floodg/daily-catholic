@@ -566,7 +566,7 @@ function TripCard({ trip, onUpdate, onDelete, storeProducts, meals, productAlter
                 brand: preferred.product.brand ?? undefined,
                 sizeLabel: preferred.product.sizeLabel ?? undefined,
                 store: preferred.product.store,
-                productUrl: preferred.product.productUrl ?? '',
+                productUrl: preferred.product.productUrl ?? null,
               }
             : ing.primaryProduct;
           let productName: string;

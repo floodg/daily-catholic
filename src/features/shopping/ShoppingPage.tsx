@@ -39,18 +39,19 @@ function parseProductBaseSize(product: IngredientProductPreference): { qty: numb
 }
 
 /**
- * Prefer an open trip that still has line items. After a trip completes, sync may
- * create a newer empty open trip; choosing it would hide all items until Unmark.
+ * Prefer all OPEN trips with items so the Shopping List can show multiple stores
+ * at once (e.g. Coles + Aldi + Woolworths). If none are open-with-items, fall
+ * back to the first open trip, then first non-empty trip, then the first trip.
  */
-function selectShoppingTripForList(trips: ShoppingTrip[]): ShoppingTrip | null {
-  if (!trips.length) return null;
+function selectShoppingTripsForList(trips: ShoppingTrip[]): ShoppingTrip[] {
+  if (!trips.length) return [];
   const open = trips.filter((t) => !t.completedAt);
   const openWithItems = open.filter((t) => (t.items?.length ?? 0) > 0);
-  if (openWithItems.length > 0) return openWithItems[0];
-  if (open.length > 0) return open[0];
+  if (openWithItems.length > 0) return openWithItems;
+  if (open.length > 0) return [open[0]];
   const withItems = trips.filter((t) => (t.items?.length ?? 0) > 0);
-  if (withItems.length > 0) return withItems[0];
-  return trips[0];
+  if (withItems.length > 0) return [withItems[0]];
+  return [trips[0]];
 }
 
 function ShoppingTripItemLabels({
@@ -195,11 +196,14 @@ export default function ShoppingPage() {
     setListLoading(true);
     try {
       const trips = await getShoppingTrips();
-      const latest = selectShoppingTripForList(trips);
-      if (!latest) {
+      const selectedTrips = selectShoppingTripsForList(trips);
+      if (selectedTrips.length === 0) {
         setAggregatedItems([]);
       } else {
-        const items: ShoppingItem[] = latest.items.map((ti: any) => {
+        const tripRows = selectedTrips.flatMap((trip) =>
+          (trip.items ?? []).map((ti: any) => ({ ...ti, _store: trip.store }))
+        );
+        const items: ShoppingItem[] = tripRows.map((ti: any) => {
           const hasPack = ti.packQuantity != null && ti.packUnit;
           const base = hasPack ? toBaseUnit(Number(ti.packQuantity), String(ti.packUnit)) : null;
           const packLabel = base ? formatQuantity(base.amount, base.unit) : null;
@@ -215,7 +219,7 @@ export default function ShoppingPage() {
           return ({
             id: ti.id,
             name: ti.productName,
-            store: latest.store,
+            store: ti._store,
             quantity: quantityLabel,
             checked: false,
             manual: false,
@@ -226,7 +230,7 @@ export default function ShoppingPage() {
         })
         .filter((item: ShoppingItem) => !item.quantity || !isUnmeasuredQuantity(item.quantity));
         setAggregatedItems(items);
-        const itemRows = latest.items as Array<any>;
+        const itemRows = tripRows as Array<any>;
         const storeProductIds = Array.from(
           new Set(
             itemRows
@@ -281,7 +285,22 @@ export default function ShoppingPage() {
           if (!ingredientId) continue;
           const resolved = resolvedById.get(ingredientId);
           if (!resolved) continue;
-          const list = [resolved.product, ...resolved.alternatives].filter((p): p is IngredientProductPreference => Boolean(p));
+
+          let list = [resolved.product, ...resolved.alternatives].filter(
+            (p): p is IngredientProductPreference => Boolean(p)
+          );
+
+          // If this trip item is already linked to a specific store product, prefer
+          // that product as the first option so the Shopping List label reflects
+          // the currently selected product (e.g. Bulla instead of the catalog default).
+          if (row.storeProductId) {
+            const idx = list.findIndex(p => p.storeProductId === row.storeProductId);
+            if (idx > 0) {
+              const [selected] = list.splice(idx, 1);
+              list = [selected, ...list];
+            }
+          }
+
           nextByItemId.set(row.id, list);
           nextLabelByItemId.set(row.id, resolved.ingredientName);
           nextIngredientIdByItemId.set(row.id, ingredientId);
@@ -329,6 +348,17 @@ export default function ShoppingPage() {
       return !purchasedKeySet.has(purchasedKey(item.name, unit));
     });
   }, [displayItems, purchasedKeySet]);
+
+  const tripItemsByStore = useMemo(() => {
+    const grouped = new Map<string, ShoppingItem[]>();
+    for (const item of filteredAggregatedItems) {
+      const store = item.store ?? "Other";
+      const list = grouped.get(store) ?? [];
+      list.push(item);
+      grouped.set(store, list);
+    }
+    return grouped;
+  }, [filteredAggregatedItems]);
 
   const handleAddManualItem = () => {
     if (!newItemName.trim()) return;
@@ -694,7 +724,7 @@ export default function ShoppingPage() {
               textTransform: 'uppercase', color: 'var(--text-muted)',
               flex: 1, textAlign: 'left',
             }}>
-              {tripStore ?? 'Shopping Trip'}
+              {tripItemsByStore.size > 1 ? 'Shopping Trips' : (tripStore ?? 'Shopping Trip')}
             </span>
             <span style={{
               fontFamily: 'DM Sans, monospace', fontSize: '0.7rem', fontWeight: 600,
@@ -711,55 +741,77 @@ export default function ShoppingPage() {
 
           {!isTripCollapsed && (
             <div className="app-card" style={{ overflow: 'hidden' }}>
-              {filteredAggregatedItems.map((item, idx) => (
-                <div
-                  key={item.id}
-                  style={{
-                    display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
-                    padding: '0.875rem 1rem',
-                    borderBottom: idx < filteredAggregatedItems.length - 1
-                      ? '1px solid var(--app-border)'
-                      : 'none',
-                    maxWidth: '100%',
-                  }}
-                >
-                  <button
-                    onClick={() => handleMarkPurchased(item as any)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center',
-                      color: 'var(--app-border-strong)', transition: 'color 0.15s',
-                      marginTop: 2,
-                    }}
-                    aria-label="Mark as purchased"
-                  >
-                    <Circle size={26} />
-                  </button>
-                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                    <ShoppingTripItemLabels
-                      tripItemId={item.id}
-                      fallbackName={item.name}
-                      quantityLabel={item.quantity}
-                      alternativesByItemId={alternativesByItemId}
-                      titleStyle={{ color: 'var(--parchment)' }}
-                    />
-                  </div>
-                  <button
-                    onClick={() => setSwappingItem(item)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      padding: '0.25rem', flexShrink: 0, display: 'flex', alignItems: 'center',
-                      opacity: 0.8,
-                      marginTop: 2,
-                      transition: 'opacity 0.15s', fontSize: '0.85rem',
-                    }}
-                    aria-label="Swap product"
-                    title="Swap product"
-                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
-                  >
-                    🔄
-                  </button>
+              {Array.from(tripItemsByStore.entries()).map(([store, storeItems], storeIdx) => (
+                <div key={store}>
+                  {tripItemsByStore.size > 1 && (
+                    <div
+                      style={{
+                        padding: '0.6rem 1rem',
+                        borderTop: storeIdx === 0 ? 'none' : '1px solid var(--app-border)',
+                        borderBottom: '1px solid var(--app-border)',
+                        background: 'rgba(255,255,255,0.02)',
+                        fontFamily: 'DM Sans, sans-serif',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        color: 'var(--text-muted)',
+                      }}
+                    >
+                      {store}
+                    </div>
+                  )}
+                  {storeItems.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
+                        padding: '0.875rem 1rem',
+                        borderBottom: idx < storeItems.length - 1
+                          ? '1px solid var(--app-border)'
+                          : 'none',
+                        maxWidth: '100%',
+                      }}
+                    >
+                      <button
+                        onClick={() => handleMarkPurchased(item as any)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center',
+                          color: 'var(--app-border-strong)', transition: 'color 0.15s',
+                          marginTop: 2,
+                        }}
+                        aria-label="Mark as purchased"
+                      >
+                        <Circle size={26} />
+                      </button>
+                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                        <ShoppingTripItemLabels
+                          tripItemId={item.id}
+                          fallbackName={item.name}
+                          quantityLabel={item.quantity}
+                          alternativesByItemId={alternativesByItemId}
+                          titleStyle={{ color: 'var(--parchment)' }}
+                        />
+                      </div>
+                      <button
+                        onClick={() => setSwappingItem(item)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          padding: '0.25rem', flexShrink: 0, display: 'flex', alignItems: 'center',
+                          opacity: 0.8,
+                          marginTop: 2,
+                          transition: 'opacity 0.15s', fontSize: '0.85rem',
+                        }}
+                        aria-label="Swap product"
+                        title="Swap product"
+                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
+                      >
+                        🔄
+                      </button>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>

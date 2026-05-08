@@ -64,7 +64,7 @@ export default function StoreProductsPage() {
       brand: product.brand ?? "",
       sizeLabel: product.sizeLabel ?? "",
       store: product.store,
-      productUrl: product.productUrl,
+      productUrl: product.productUrl ?? "",
       imageUrl: product.imageUrl ?? "",
     });
     setIsEditing(true);
@@ -77,7 +77,7 @@ export default function StoreProductsPage() {
       brand: product.brand ?? "",
       sizeLabel: product.sizeLabel ?? "",
       store: product.store,
-      productUrl: product.productUrl,
+      productUrl: product.productUrl ?? "",
       imageUrl: product.imageUrl ?? "",
     });
     setIsEditing(false);
@@ -88,19 +88,15 @@ export default function StoreProductsPage() {
       alert("Please enter a product name");
       return;
     }
-    if (!formData.productUrl.trim()) {
-      alert("Please enter a product URL");
-      return;
-    }
-
     setSaving(true);
     try {
+      const productUrl = formData.productUrl?.trim() || null;
       const payload = {
         name: formData.name.trim(),
         brand: formData.brand?.trim() || undefined,
         sizeLabel: formData.sizeLabel?.trim() || undefined,
         store: formData.store,
-        productUrl: formData.productUrl.trim(),
+        productUrl,
         imageUrl: formData.imageUrl?.trim() || undefined,
       };
 
@@ -421,15 +417,15 @@ function ProductForm({ formData, onChange, onSave, onCancel, saving, isNew }: Pr
       </div>
 
       <div className="form-group">
-        <label className="app-label">Product URL *</label>
+        <label className="app-label">Product URL</label>
         <input
           className="app-input"
           type="url"
-          value={formData.productUrl}
+          value={formData.productUrl ?? ""}
           onChange={e => onChange({ ...formData, productUrl: e.target.value })}
           placeholder="https://www.coles.com.au/product/…"
         />
-        <p className="form-hint">Use the full URL to the product on the store website.</p>
+        <p className="form-hint">Optional: use the full URL when the store has an online product page.</p>
       </div>
 
       <div className="form-group">
@@ -548,14 +544,18 @@ function ProductView({ product, onEdit, onDelete }: ProductViewProps) {
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem' }}>
           <span style={{ color: 'var(--text-subtle)' }}>Product URL</span>
-          <a
-            href={product.productUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: 'var(--gold)', fontWeight: 600, textDecoration: 'none' }}
-          >
-            Open product ↗
-          </a>
+          {product.productUrl ? (
+            <a
+              href={product.productUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--gold)', fontWeight: 600, textDecoration: 'none' }}
+            >
+              Open product ↗
+            </a>
+          ) : (
+            <span style={{ color: 'var(--text-muted)' }}>No link available</span>
+          )}
         </div>
       </div>
     </div>

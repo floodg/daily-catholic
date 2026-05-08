@@ -8,7 +8,7 @@ export interface StoreProduct {
   brand?: string;
   sizeLabel?: string;
   store: string;
-  productUrl: string;
+  productUrl: string | null;
   imageUrl?: string;
   createdAt: string;
 }
@@ -19,7 +19,7 @@ export interface MealIngredientProduct {
   brand?: string;
   sizeLabel?: string;
   store: string;
-  productUrl: string;
+  productUrl: string | null;
   imageUrl?: string;
 }
 

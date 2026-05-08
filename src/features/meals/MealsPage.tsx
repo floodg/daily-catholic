@@ -613,7 +613,7 @@ function IngredientProductPopup({ ingredient, onClose }: { ingredient: Ingredien
             brand: p!.brand ?? undefined,
             sizeLabel: p!.sizeLabel ?? undefined,
             store: p!.store,
-            productUrl: p!.productUrl ?? "",
+            productUrl: p!.productUrl ?? null,
           }));
         if (mapped.length > 0) setProducts(mapped);
       } catch (err) {
