@@ -138,6 +138,7 @@ export default function ShoppingPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [hideChecked, setHideChecked] = useState(false);
   const [pendingItems, setPendingItems] = useState<PendingShoppingListItem[]>([]);
+  const [collapsedStores, setCollapsedStores] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const today = new Date();
@@ -360,6 +361,18 @@ export default function ShoppingPage() {
     return grouped;
   }, [filteredAggregatedItems]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Mobile default: keep first store expanded, collapse the rest.
+    if (window.innerWidth > 640) return;
+    const stores = Array.from(tripItemsByStore.keys());
+    if (stores.length <= 1) {
+      setCollapsedStores(new Set());
+      return;
+    }
+    setCollapsedStores(new Set(stores.slice(1)));
+  }, [tripItemsByStore]);
+
   const handleAddManualItem = () => {
     if (!newItemName.trim()) return;
     const newItem: ShoppingItem = {
@@ -437,6 +450,14 @@ export default function ShoppingPage() {
     setCollapsedSections(prev => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function toggleStore(store: string) {
+    setCollapsedStores(prev => {
+      const next = new Set(prev);
+      next.has(store) ? next.delete(store) : next.add(store);
       return next;
     });
   }
@@ -746,22 +767,56 @@ export default function ShoppingPage() {
                   {tripItemsByStore.size > 1 && (
                     <div
                       style={{
-                        padding: '0.6rem 1rem',
                         borderTop: storeIdx === 0 ? 'none' : '1px solid var(--app-border)',
                         borderBottom: '1px solid var(--app-border)',
                         background: 'rgba(255,255,255,0.02)',
-                        fontFamily: 'DM Sans, sans-serif',
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        letterSpacing: '0.08em',
-                        textTransform: 'uppercase',
-                        color: 'var(--text-muted)',
                       }}
                     >
-                      {store}
+                      <button
+                        onClick={() => toggleStore(store)}
+                        style={{
+                          width: '100%',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0.6rem 1rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                        }}
+                        aria-label={`Toggle ${store} items`}
+                      >
+                        <span style={{
+                          fontFamily: 'DM Sans, sans-serif',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                          color: 'var(--text-muted)',
+                          flex: 1,
+                          textAlign: 'left',
+                        }}>
+                          {store}
+                        </span>
+                        <span style={{
+                          fontFamily: 'DM Sans, monospace',
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          color: 'var(--text-subtle)',
+                          background: 'var(--app-border)',
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: 100,
+                        }}>
+                          {storeItems.length}
+                        </span>
+                        {collapsedStores.has(store)
+                          ? <ChevronRight size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                          : <ChevronDown size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                        }
+                      </button>
                     </div>
                   )}
-                  {storeItems.map((item, idx) => (
+                  {!collapsedStores.has(store) && storeItems.map((item, idx) => (
                     <div
                       key={item.id}
                       style={{

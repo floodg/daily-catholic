@@ -638,6 +638,94 @@ const persistIngredientPreferences = async (
   }
 };
 
+// --- Trip Item Upsert ---
+// If a product already exists on the current open trip, increment quantity
+// instead of inserting a duplicate row.
+const upsertTripItemForProduct = async (
+  supabase: AnySupabaseClient,
+  tripId: string,
+  title: string,
+  candidate: Candidate,
+  log: LogFn
+): Promise<void> => {
+  if (!candidate.id) {
+    log(
+      `[sync] "${title}": missing store_product_id — cannot upsert trip item`,
+      "warn",
+      { title, reason: "missing_store_product_id", trip_id: tripId }
+    );
+    return;
+  }
+
+  const { data: existing, error: findErr } = await supabase
+    .from("shopping_trip_items")
+    .select("id, quantity_purchased")
+    .eq("shopping_trip_id", tripId)
+    .eq("store_product_id", candidate.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (findErr) {
+    log(
+      `[sync] "${title}": shopping_trip_items lookup error: ${JSON.stringify(findErr)}`,
+      "error",
+      { title, table: "shopping_trip_items", trip_id: tripId, error: findErr }
+    );
+    return;
+  }
+
+  if (existing) {
+    const row = existing as { id: string; quantity_purchased: number | null };
+    const nextQuantity = Math.max(1, Number(row.quantity_purchased ?? 0) + 1);
+    const { error: updErr } = await supabase
+      .from("shopping_trip_items")
+      .update({ quantity_purchased: nextQuantity })
+      .eq("id", row.id);
+
+    if (updErr) {
+      log(
+        `[sync] "${title}": shopping_trip_items quantity update error: ${JSON.stringify(updErr)}`,
+        "error",
+        { title, table: "shopping_trip_items", trip_id: tripId, row_id: row.id, error: updErr }
+      );
+      return;
+    }
+
+    log(
+      `[sync] "${title}": incremented shopping_trip_items quantity to ${nextQuantity} (row=${row.id})`,
+      "info",
+      { title, trip_id: tripId, shopping_trip_item_id: row.id, quantity_purchased: nextQuantity }
+    );
+    return;
+  }
+
+  const pack = parsePackSize(candidate.size_label);
+  const productName = [candidate.brand, candidate.name].filter(Boolean).join(" ").trim() || title;
+  const { error: tiErr } = await supabase.from("shopping_trip_items").insert({
+    shopping_trip_id: tripId,
+    product_name: productName,
+    ingredient_name: title,
+    quantity_purchased: 1,
+    pack_quantity: pack?.qty ?? null,
+    pack_unit: pack?.unit ?? null,
+    store_product_id: candidate.id || null,
+  });
+  if (tiErr) {
+    log(
+      `[sync] "${title}": shopping_trip_items insert error: ${JSON.stringify(tiErr)}`,
+      "error",
+      { title, table: "shopping_trip_items", trip_id: tripId, error: tiErr }
+    );
+  } else {
+    log(
+      `[sync] "${title}": added to shopping_trip_items (trip=${tripId})`,
+      "info",
+      { title, trip_id: tripId }
+    );
+  }
+};
+
 // --- Logging ---
 // `log` writes to three sinks:
 //   1. console (so Supabase's built-in function log viewer still picks it up),
@@ -803,35 +891,12 @@ Deno.serve(async () => {
           );
         }
 
-        // 5. Insert into shopping_trip_items under today's trip for this store.
+        // 5. Insert/update shopping_trip_items under today's trip for this store.
         //    The user marks the item purchased from the Shopping page Trip
         //    section, which inserts a shopping_list row with quantity+unit and
         //    fires the purchase trigger that credits the Pantry.
         if (tripId) {
-          const pack = parsePackSize(candidate.size_label);
-          const productName = [candidate.brand, candidate.name].filter(Boolean).join(" ").trim() || title;
-          const { error: tiErr } = await supabase.from("shopping_trip_items").insert({
-            shopping_trip_id: tripId,
-            product_name: productName,
-            ingredient_name: title,
-            quantity_purchased: 1,
-            pack_quantity: pack?.qty ?? null,
-            pack_unit: pack?.unit ?? null,
-            store_product_id: candidate.id || null,
-          });
-          if (tiErr) {
-            log(
-              `[sync] "${title}": shopping_trip_items insert error: ${JSON.stringify(tiErr)}`,
-              "error",
-              { store, title, table: "shopping_trip_items", trip_id: tripId, error: tiErr }
-            );
-          } else {
-            log(
-              `[sync] "${title}": added to shopping_trip_items (trip=${tripId})`,
-              "info",
-              { store, title, trip_id: tripId }
-            );
-          }
+          await upsertTripItemForProduct(supabase, tripId, title, candidate, log);
         } else if (syncUserId) {
           log(
             `[sync] "${title}": no trip available — skipping shopping_trip_items insert`,
