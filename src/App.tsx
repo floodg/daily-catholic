@@ -25,12 +25,26 @@ import FiatModePage from './features/fiat/FiatModePage'
 import MacrosPage from './features/macros/MacrosPage'
 import WalkDetailPage from './features/walking/WalkDetailPage'
 
+function AuthBootstrapLoading() {
+  return (
+    <div className="auth-loading" role="status" aria-live="polite">
+      <span className="sr-only">Loading application</span>
+      <div className="auth-loading-brand">Daily Catholic</div>
+      <div className="auth-loading-sacred-divider" aria-hidden>
+        <span className="auth-loading-sacred-divider-symbol">✦</span>
+      </div>
+      <div className="auth-loading-spinner" aria-hidden />
+      <p className="auth-loading-msg">Loading…</p>
+    </div>
+  )
+}
+
 function ProtectedRoute() {
   const { session, loading, profile, profileLoading } = useAuth()
   const location = useLocation()
 
   // Only block on initial load — don't unmount children during token/profile refreshes
-  if (loading || (profileLoading && profile === null)) return <div className="auth-loading">Loading…</div>
+  if (loading || (profileLoading && profile === null)) return <AuthBootstrapLoading />
   if (!session) return <Navigate to="/login" replace state={{ from: location }} />
 
   if (
@@ -48,7 +62,7 @@ function AdminRoute() {
   const { session, loading, profile, profileLoading } = useAuth()
   const location = useLocation()
 
-  if (loading || (profileLoading && profile === null)) return <div className="auth-loading">Loading…</div>
+  if (loading || (profileLoading && profile === null)) return <AuthBootstrapLoading />
   if (!session) return <Navigate to="/login" replace state={{ from: location }} />
   if (profile?.role !== 'admin') return <Navigate to="/app/dashboard" replace />
 
@@ -60,7 +74,7 @@ function FiatSessionGuard() {
   const { session, loading } = useAuth()
   const location = useLocation()
 
-  if (loading) return <div className="auth-loading">Loading…</div>
+  if (loading) return <AuthBootstrapLoading />
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location }} />
   }
