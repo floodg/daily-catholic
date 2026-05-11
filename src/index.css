@@ -53,6 +53,109 @@
   to   { opacity: 1; }
 }
 
+@keyframes shellSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Bootstrap loading (outside Layout — must not depend on app.css) ─── */
+.auth-loading,
+.onboarding-loading {
+  box-sizing: border-box;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  text-align: center;
+  color: #e8e0d0;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -12%, rgba(201, 168, 76, 0.14), transparent 55%),
+    radial-gradient(ellipse 70% 45% at 50% 120%, rgba(168, 196, 224, 0.06), transparent 50%),
+    #0d1117;
+  animation: fadeIn 0.45s ease both;
+}
+
+.onboarding-loading {
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: rgba(232, 224, 208, 0.5);
+  line-height: 1.4;
+  max-width: 22rem;
+}
+
+.onboarding-loading::before {
+  content: "";
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  border: 3px solid rgba(201, 168, 76, 0.12);
+  border-top-color: #c9a84c;
+  animation: shellSpin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+.auth-loading-brand {
+  margin: 0;
+  padding: 0 0.75rem;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(201, 168, 76, 0.85);
+}
+
+.auth-loading-spinner {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  border: 3px solid rgba(201, 168, 76, 0.12);
+  border-top-color: #c9a84c;
+  animation: shellSpin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+.auth-loading-msg {
+  margin: 0;
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgba(232, 224, 208, 0.45);
+}
+
+.auth-loading-sacred-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: min(280px, 100%);
+}
+
+.auth-loading-sacred-divider::before,
+.auth-loading-sacred-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(201, 168, 76, 0.22),
+    transparent
+  );
+}
+
+.auth-loading-sacred-divider-symbol {
+  font-size: 0.5rem;
+  color: rgba(201, 168, 76, 0.4);
+  letter-spacing: 0.28em;
+  font-family: Georgia, serif;
+}
+
 /* ── Base ───────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
 
