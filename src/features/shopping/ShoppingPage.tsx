@@ -16,7 +16,7 @@ import {
   type PendingShoppingListItem,
 } from "./api";
 import { unmarkPurchasedShoppingItem } from "./api";
-import { getShoppingTrips, updateShoppingTripItem } from "../shopping-trips/api";
+import { deleteShoppingTripItem, getShoppingTrips, updateShoppingTripItem } from "../shopping-trips/api";
 import { supabase } from "../../lib/supabase";
 import {
   resolvePreferredProductsForIngredientNames,
@@ -411,6 +411,19 @@ export default function ShoppingPage() {
     try {
       await deletePendingShoppingListItem(id);
       setPendingItems(prev => prev.filter(i => i.id !== id));
+    } catch (err) {
+      console.error(err);
+      alert('Failed to remove item.');
+    }
+  };
+
+  const handleDeleteTripItem = async (item: ShoppingItem) => {
+    const label = item.name ?? 'this item';
+    if (!confirm(`Remove "${label}" from your shopping trip?`)) return;
+    try {
+      await deleteShoppingTripItem(item.id);
+      await generateShoppingList();
+      await refreshPurchased();
     } catch (err) {
       console.error(err);
       alert('Failed to remove item.');
@@ -849,22 +862,40 @@ export default function ShoppingPage() {
                           titleStyle={{ color: 'var(--parchment)' }}
                         />
                       </div>
-                      <button
-                        onClick={() => setSwappingItem(item)}
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          padding: '0.25rem', flexShrink: 0, display: 'flex', alignItems: 'center',
-                          opacity: 0.8,
-                          marginTop: 2,
-                          transition: 'opacity 0.15s', fontSize: '0.85rem',
-                        }}
-                        aria-label="Swap product"
-                        title="Swap product"
-                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                        onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
-                      >
-                        🔄
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.125rem', flexShrink: 0, marginTop: 2 }}>
+                        <button
+                          onClick={() => setSwappingItem(item)}
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            padding: '0.25rem', display: 'flex', alignItems: 'center',
+                            opacity: 0.8,
+                            transition: 'opacity 0.15s', fontSize: '0.85rem',
+                          }}
+                          aria-label="Swap product"
+                          title="Swap product"
+                          onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                          onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
+                        >
+                          🔄
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTripItem(item)}
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            padding: '0.25rem', display: 'flex', alignItems: 'center',
+                            color: 'var(--text-subtle)',
+                            opacity: 0.55,
+                            transition: 'opacity 0.15s',
+                          }}
+                          aria-label="Remove from trip"
+                          title="Remove from trip"
+                          onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                          onMouseLeave={e => (e.currentTarget.style.opacity = '0.55')}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
