@@ -20,6 +20,8 @@ export interface PurchasedShoppingItem {
   shoppingTripItemId?: string | null;
   /** Set when the linked trip has `completed_at` — hidden from Done; still counted for suppressing trip lines */
   tripCompletedAt?: string | null;
+  /** Set when the user clears Done — hidden from Done; purchase ledger rows are kept */
+  doneClearedAt?: string | null;
 }
 
 export async function fetchAggregatedShoppingListForThisWeek(): Promise<AggregatedShoppingItem[]> {
@@ -100,6 +102,7 @@ export async function fetchPurchasedShoppingItems(): Promise<PurchasedShoppingIt
       requested_quantity,
       source,
       created_at,
+      done_cleared_at,
       shopping_trip_item_id,
       shopping_trip_items (
         shopping_trips (
@@ -127,8 +130,31 @@ export async function fetchPurchasedShoppingItems(): Promise<PurchasedShoppingIt
       createdAt: row.created_at as string,
       shoppingTripItemId: (row.shopping_trip_item_id as string | null) ?? null,
       tripCompletedAt,
+      doneClearedAt: (row.done_cleared_at as string | null) ?? null,
     };
   });
+}
+
+/** Hides checked items from the Done section without undoing pantry purchases. */
+export async function clearDoneShoppingListItems(): Promise<number> {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (!user) throw new Error('Not authenticated');
+
+  const items = await fetchPurchasedShoppingItems();
+  const ids = items
+    .filter((item) => !item.tripCompletedAt && !item.doneClearedAt)
+    .map((item) => item.id);
+  if (ids.length === 0) return 0;
+
+  const clearedAt = new Date().toISOString();
+  const { error } = await supabase
+    .from('shopping_list')
+    .update({ done_cleared_at: clearedAt })
+    .eq('user_id', user.id)
+    .in('id', ids);
+  if (error) throw error;
+  return ids.length;
 }
 
 // ─── Pending (Google Tasks) items ─────────────────────────────────────────────

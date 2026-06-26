@@ -86,14 +86,66 @@ const getAllTaskLists = async (token: string): Promise<Map<string, string>> => {
   return map;
 };
 
-const getTasks = async (token: string, listId: string): Promise<any[]> => {
-  const res = await fetch(
-    `https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks?showCompleted=false`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.items ?? [];
+/** Completed Google Tasks older than this are deleted during sync. */
+const COMPLETED_TASK_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+const getTasks = async (
+  token: string,
+  listId: string,
+  showCompleted = false
+): Promise<any[]> => {
+  const tasks: any[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      showCompleted: String(showCompleted),
+      showHidden: "true",
+      maxResults: "100",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await fetch(
+      `https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks?${params}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) break;
+
+    const data = await res.json();
+    tasks.push(...(data.items ?? []));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return tasks;
+};
+
+/** Remove completed (Done) Google Tasks that are older than one week. */
+const purgeOldCompletedTasks = async (
+  token: string,
+  listId: string,
+  store: string,
+  log: LogFn
+): Promise<number> => {
+  const cutoff = Date.now() - COMPLETED_TASK_RETENTION_MS;
+  const tasks = await getTasks(token, listId, true);
+  let purged = 0;
+
+  for (const task of tasks) {
+    if (task?.status !== "completed" || !task?.id) continue;
+
+    const completedAt = task.completed ? Date.parse(task.completed) : NaN;
+    if (!Number.isFinite(completedAt) || completedAt > cutoff) continue;
+
+    await deleteTask(token, listId, task.id);
+    purged++;
+    log(
+      `[purge] ${store}: deleted completed task "${task.title ?? ""}" (completed ${task.completed})`,
+      "info",
+      { store, task_id: task.id, title: task.title, completed: task.completed }
+    );
+  }
+
+  return purged;
 };
 
 const buildStoreAliasMap = (log: LogFn): Record<string, string> => {
@@ -125,6 +177,46 @@ const normalizeStoreName = (listTitle: string, storeNameMap: Record<string, stri
   if (!trimmed) return listTitle;
   const mapped = storeNameMap[trimmed.toLowerCase()];
   return mapped ?? trimmed;
+};
+
+/** Matches task titles like "Almond meal from Coles" or "Drill bits from Bunnings". */
+const FROM_STORE_PATTERN = /\s+from\s+(.+)$/i;
+
+interface ParsedTask {
+  productName: string;
+  store: string;
+  storeFromTitle: boolean;
+}
+
+/**
+ * Parse a Google Task title into product + store.
+ * When the title contains " from [store]", the store suffix wins over the list name
+ * (supports a single generic Tasks list). Known store aliases are normalized via
+ * storeNameMap; unknown stores keep the raw text after "from".
+ */
+const parseTaskTitle = (
+  title: string,
+  listStore: string,
+  storeNameMap: Record<string, string>,
+): ParsedTask => {
+  const trimmed = title.trim();
+  const match = trimmed.match(FROM_STORE_PATTERN);
+  if (match && match.index != null) {
+    const productName = trimmed.slice(0, match.index).trim();
+    const rawStore = match[1].trim();
+    if (productName && rawStore) {
+      return {
+        productName,
+        store: normalizeStoreName(rawStore, storeNameMap),
+        storeFromTitle: true,
+      };
+    }
+  }
+  return {
+    productName: trimmed,
+    store: listStore,
+    storeFromTitle: false,
+  };
 };
 
 const deleteTask = async (token: string, listId: string, taskId: string): Promise<void> => {
@@ -814,9 +906,20 @@ Deno.serve(async () => {
 
   let processed = 0;
   let skipped = 0;
+  let purged = 0;
 
   for (const [listTitle, listId] of taskLists) {
     const store = normalizeStoreName(listTitle, storeNameMap);
+    const purgedForList = await purgeOldCompletedTasks(token, listId, store, log);
+    purged += purgedForList;
+    if (purgedForList > 0) {
+      log(
+        `[purge] ${store}: removed ${purgedForList} completed task(s) older than 1 week`,
+        "info",
+        { store, purged: purgedForList }
+      );
+    }
+
     const tasks = await getTasks(token, listId);
     log(
       `[sync] ${store} (list="${listTitle}") tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`,
@@ -825,13 +928,19 @@ Deno.serve(async () => {
     );
     if (!Array.isArray(tasks) || tasks.length === 0) continue;
 
-    // Resolve (or create) a trip for today scoped to this store. Items below
-    // will be inserted as shopping_trip_items linked to this trip. If no
-    // SYNC_USER_ID is configured we cannot create user-scoped trips.
-    let tripId: string | null = null;
-    if (syncUserId) {
-      tripId = await findOrCreateOpenTrip(supabase, syncUserId, store, log);
-    } else {
+    // Trips are keyed by resolved store — a generic list may contain items for
+    // multiple stores (e.g. "Milk from Coles", "Bread from Woolworths").
+    const tripIdsByStore = new Map<string, string>();
+    const resolveTripId = async (itemStore: string): Promise<string | null> => {
+      if (!syncUserId) return null;
+      const cached = tripIdsByStore.get(itemStore);
+      if (cached) return cached;
+      const tripId = await findOrCreateOpenTrip(supabase, syncUserId, itemStore, log);
+      if (tripId) tripIdsByStore.set(itemStore, tripId);
+      return tripId;
+    };
+
+    if (!syncUserId) {
       log(
         `[sync] ${store}: SYNC_USER_ID not set — cannot create shopping trip; items will be enriched only`,
         "warn",
@@ -841,14 +950,21 @@ Deno.serve(async () => {
 
     for (const task of tasks) {
       const title: string = task?.title ?? "";
-      log(`[sync] Processing task: "${title}" (store=${store} id=${task.id})`, "info", { store, title, task_id: task.id });
       if (!title) { skipped++; continue; }
+
+      const parsed = parseTaskTitle(title, store, storeNameMap);
+      const { productName, store: itemStore, storeFromTitle } = parsed;
+      log(
+        `[sync] Processing task: "${title}" → product="${productName}" store=${itemStore} (list=${store}, fromTitle=${storeFromTitle}, id=${task.id})`,
+        "info",
+        { list_store: store, item_store: itemStore, title, product_name: productName, store_from_title: storeFromTitle, task_id: task.id }
+      );
 
       try {
         // 1. Lookup existing store_products for this store, or enrich via Claude
-        const rawCandidate = await collectCandidate(supabase, title, store, log);
+        const rawCandidate = await collectCandidate(supabase, productName, itemStore, log);
         if (!rawCandidate) {
-          log(`[sync] "${title}": skipping — no candidate found`, "warn", { store, title, reason: "no_candidate" });
+          log(`[sync] "${title}": skipping — no candidate found`, "warn", { store: itemStore, title, product_name: productName, reason: "no_candidate" });
           skipped++;
           continue;
         }
@@ -856,14 +972,14 @@ Deno.serve(async () => {
         // 2. Persist to store_products if new
         const candidate = await persistCandidate(supabase, rawCandidate, log);
         if (!candidate) {
-          log(`[sync] "${title}": skipping — store_products persist failed`, "warn", { store, title, reason: "persist_failed" });
+          log(`[sync] "${title}": skipping — store_products persist failed`, "warn", { store: itemStore, title, reason: "persist_failed" });
           skipped++;
           continue;
         }
 
         // 3. Resolve or create ingredient, then save as default product
-        const ingredientId = await resolveIngredient(supabase, title);
-        log(`[sync] "${title}": ingredientId=${ingredientId}`, "info", { store, title, ingredient_id: ingredientId });
+        const ingredientId = await resolveIngredient(supabase, productName);
+        log(`[sync] "${title}": ingredientId=${ingredientId}`, "info", { store: itemStore, title, product_name: productName, ingredient_id: ingredientId });
         if (ingredientId) {
           await persistIngredientPreferences(supabase, ingredientId, candidate.id, []);
         }
@@ -887,39 +1003,40 @@ Deno.serve(async () => {
           log(
             `[sync] "${title}": shopping_list_items insert error: ${JSON.stringify(insertErr)}`,
             "error",
-            { store, title, table: "shopping_list_items", error: insertErr }
+            { store: itemStore, title, table: "shopping_list_items", error: insertErr }
           );
         }
 
-        // 5. Insert/update shopping_trip_items under today's trip for this store.
+        // 5. Insert/update shopping_trip_items under the open trip for this item's store.
         //    The user marks the item purchased from the Shopping page Trip
         //    section, which inserts a shopping_list row with quantity+unit and
         //    fires the purchase trigger that credits the Pantry.
+        const tripId = await resolveTripId(itemStore);
         if (tripId) {
-          await upsertTripItemForProduct(supabase, tripId, title, candidate, log);
+          await upsertTripItemForProduct(supabase, tripId, productName, candidate, log);
         } else if (syncUserId) {
           log(
             `[sync] "${title}": no trip available — skipping shopping_trip_items insert`,
             "warn",
-            { store, title, reason: "no_trip" }
+            { store: itemStore, title, reason: "no_trip" }
           );
         }
 
         // Delete task only after successful processing
         await deleteTask(token, listId, task.id);
         processed++;
-        log(`[sync] "${title}": processed OK`, "info", { store, title });
+        log(`[sync] "${title}": processed OK`, "info", { store: itemStore, title, product_name: productName });
       } catch (e) {
         log(
           `[sync] "${title}": EXCEPTION: ${e}`,
           "error",
-          { store, title, task_id: task?.id, error: String(e) }
+          { store: itemStore, title, task_id: task?.id, error: String(e) }
         );
         skipped++;
       }
     }
   }
 
-  log(`[sync] Done. processed=${processed} skipped=${skipped}`, "info", { processed, skipped });
-  return respond({ ok: true, processed, skipped, debug: debugLog });
+  log(`[sync] Done. processed=${processed} skipped=${skipped} purged=${purged}`, "info", { processed, skipped, purged });
+  return respond({ ok: true, processed, skipped, purged, debug: debugLog });
 });
