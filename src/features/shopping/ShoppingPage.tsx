@@ -12,6 +12,7 @@ import {
   fetchPendingShoppingListItems,
   checkOffPendingShoppingListItem,
   deletePendingShoppingListItem,
+  clearDoneShoppingListItems,
   type PurchasedShoppingItem,
   type PendingShoppingListItem,
 } from "./api";
@@ -189,7 +190,7 @@ export default function ShoppingPage() {
 
   /** Checked items from the in-progress trip only; completed trips stay in DB for pantry but leave Done */
   const purchasedItemsForDone = useMemo(
-    () => purchasedItems.filter((p) => !p.tripCompletedAt),
+    () => purchasedItems.filter((p) => !p.tripCompletedAt && !p.doneClearedAt),
     [purchasedItems],
   );
 
@@ -459,6 +460,29 @@ export default function ShoppingPage() {
     }
   };
 
+  const handleClearDone = async () => {
+    const dbDoneCount = purchasedItemsForDone.length;
+    const totalToClear = dbDoneCount + checkedManual;
+    if (totalToClear === 0) return;
+
+    const label = totalToClear === 1 ? '1 done item' : `${totalToClear} done items`;
+    if (!confirm(`Clear ${label} from the list? Purchases stay in your pantry.`)) return;
+
+    try {
+      if (dbDoneCount > 0) {
+        await clearDoneShoppingListItems();
+      }
+      if (checkedManual > 0) {
+        setManualItems((prev) => prev.filter((item) => !item.checked));
+      }
+      await refreshPurchased();
+      await generateShoppingList();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to clear done items.');
+    }
+  };
+
   function toggleSection(key: SectionKey) {
     setCollapsedSections(prev => {
       const next = new Set(prev);
@@ -664,26 +688,28 @@ export default function ShoppingPage() {
             </p>
           )}
         </div>
-        {checkedManual > 0 && (
+        {doneCount > 0 && (
           <div style={{
             borderTop: '1px solid var(--app-border)',
             padding: '0.625rem 1.25rem',
             display: 'flex', gap: '0.5rem',
           }}>
             <button
-              onClick={() => setManualItems(prev => prev.filter(i => !i.checked))}
+              onClick={handleClearDone}
               className="btn-app-ghost"
               style={{ fontSize: '0.75rem' }}
             >
-              <Trash2 size={12} /> Clear {checkedManual} done
+              <Trash2 size={12} /> Clear {doneCount} done
             </button>
-            <button
-              onClick={() => setManualItems(prev => prev.map(i => ({ ...i, checked: false })))}
-              className="btn-app-ghost"
-              style={{ fontSize: '0.75rem' }}
-            >
-              <RotateCcw size={12} /> Uncheck all
-            </button>
+            {checkedManual > 0 && (
+              <button
+                onClick={() => setManualItems(prev => prev.map(i => ({ ...i, checked: false })))}
+                className="btn-app-ghost"
+                style={{ fontSize: '0.75rem' }}
+              >
+                <RotateCcw size={12} /> Uncheck all
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1122,6 +1148,17 @@ export default function ShoppingPage() {
             }}>
               {purchasedItemsForDone.length}
             </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleClearDone();
+              }}
+              className="btn-app-ghost"
+              style={{ fontSize: '0.7rem', padding: '0.2rem 0.6rem', flexShrink: 0 }}
+            >
+              <Trash2 size={12} /> Clear
+            </button>
             {isDoneCollapsed
               ? <ChevronRight size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
               : <ChevronDown size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />

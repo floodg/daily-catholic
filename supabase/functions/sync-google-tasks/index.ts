@@ -86,14 +86,66 @@ const getAllTaskLists = async (token: string): Promise<Map<string, string>> => {
   return map;
 };
 
-const getTasks = async (token: string, listId: string): Promise<any[]> => {
-  const res = await fetch(
-    `https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks?showCompleted=false`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.items ?? [];
+/** Completed Google Tasks older than this are deleted during sync. */
+const COMPLETED_TASK_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+const getTasks = async (
+  token: string,
+  listId: string,
+  showCompleted = false
+): Promise<any[]> => {
+  const tasks: any[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      showCompleted: String(showCompleted),
+      showHidden: "true",
+      maxResults: "100",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await fetch(
+      `https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks?${params}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) break;
+
+    const data = await res.json();
+    tasks.push(...(data.items ?? []));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return tasks;
+};
+
+/** Remove completed (Done) Google Tasks that are older than one week. */
+const purgeOldCompletedTasks = async (
+  token: string,
+  listId: string,
+  store: string,
+  log: LogFn
+): Promise<number> => {
+  const cutoff = Date.now() - COMPLETED_TASK_RETENTION_MS;
+  const tasks = await getTasks(token, listId, true);
+  let purged = 0;
+
+  for (const task of tasks) {
+    if (task?.status !== "completed" || !task?.id) continue;
+
+    const completedAt = task.completed ? Date.parse(task.completed) : NaN;
+    if (!Number.isFinite(completedAt) || completedAt > cutoff) continue;
+
+    await deleteTask(token, listId, task.id);
+    purged++;
+    log(
+      `[purge] ${store}: deleted completed task "${task.title ?? ""}" (completed ${task.completed})`,
+      "info",
+      { store, task_id: task.id, title: task.title, completed: task.completed }
+    );
+  }
+
+  return purged;
 };
 
 const buildStoreAliasMap = (log: LogFn): Record<string, string> => {
@@ -814,9 +866,20 @@ Deno.serve(async () => {
 
   let processed = 0;
   let skipped = 0;
+  let purged = 0;
 
   for (const [listTitle, listId] of taskLists) {
     const store = normalizeStoreName(listTitle, storeNameMap);
+    const purgedForList = await purgeOldCompletedTasks(token, listId, store, log);
+    purged += purgedForList;
+    if (purgedForList > 0) {
+      log(
+        `[purge] ${store}: removed ${purgedForList} completed task(s) older than 1 week`,
+        "info",
+        { store, purged: purgedForList }
+      );
+    }
+
     const tasks = await getTasks(token, listId);
     log(
       `[sync] ${store} (list="${listTitle}") tasks found=${tasks.length} titles=${JSON.stringify(tasks.map((t: any) => t.title))}`,
@@ -920,6 +983,6 @@ Deno.serve(async () => {
     }
   }
 
-  log(`[sync] Done. processed=${processed} skipped=${skipped}`, "info", { processed, skipped });
-  return respond({ ok: true, processed, skipped, debug: debugLog });
+  log(`[sync] Done. processed=${processed} skipped=${skipped} purged=${purged}`, "info", { processed, skipped, purged });
+  return respond({ ok: true, processed, skipped, purged, debug: debugLog });
 });
