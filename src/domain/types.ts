@@ -2,6 +2,9 @@
 
 export type MeasurementUnitCode = "g" | "kg" | "ml" | "l" | "units" | "tsp" | "tbsp" | "cup";
 
+/** Catalog item kind: food for meals; household for cleaning/hardware/etc. */
+export type IngredientKind = "food" | "household";
+
 export interface StoreProduct {
   id: string;
   name: string;
@@ -37,6 +40,7 @@ export interface Ingredient {
   /** Ingredient-level flags from the global catalog */
   optional?: boolean;
   pantryStaple?: boolean;
+  kind?: IngredientKind;
   /** Primary linked store product */
   primaryProduct?: MealIngredientProduct;
   /** Alternative product options */

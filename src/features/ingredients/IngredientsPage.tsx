@@ -16,6 +16,7 @@ const EMPTY_FORM = {
   name: "",
   optional: false,
   pantryStaple: false,
+  kind: "food" as "food" | "household",
   defaultStoreProductId: null as string | null,
   alternativeStoreProductIds: [] as string[],
 };
@@ -80,6 +81,7 @@ export default function IngredientsPage() {
           name: data.name.trim(),
           optional: data.optional,
           pantryStaple: data.pantryStaple,
+          kind: data.kind,
           defaultStoreProductId: data.defaultStoreProductId,
         });
         await saveIngredientProductPreferences({
@@ -92,6 +94,7 @@ export default function IngredientsPage() {
           name: data.name.trim(),
           optional: data.optional,
           pantryStaple: data.pantryStaple,
+          kind: data.kind,
           defaultStoreProductId: data.defaultStoreProductId,
         });
         await saveIngredientProductPreferences({
@@ -225,6 +228,7 @@ function IngredientForm({
     name: initialItem?.name ?? "",
     optional: initialItem?.optional ?? false,
     pantryStaple: initialItem?.pantryStaple ?? false,
+    kind: initialItem?.kind ?? "food",
     defaultStoreProductId: initialItem?.defaultStoreProductId ?? null,
     alternativeStoreProductIds: initialItem?.alternativeStoreProducts.map((p) => p.storeProductId) ?? [],
   }));
@@ -259,6 +263,37 @@ function IngredientForm({
       </div>
 
       <div className="form-group">
+        <label className="app-label">Kind</label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+          {([
+            { value: "food" as const, label: "Food" },
+            { value: "household" as const, label: "Household" },
+          ]).map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setLocalData({ ...localData, kind: value })}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem",
+                padding: "0.625rem 0.875rem", borderRadius: 12, cursor: "pointer",
+                border: localData.kind === value ? "1.5px solid var(--gold)" : "1.5px solid var(--app-border)",
+                background: localData.kind === value ? "rgba(201,168,76,0.08)" : "rgba(255,255,255,0.02)",
+                fontFamily: "DM Sans, sans-serif", fontSize: "0.875rem",
+                color: localData.kind === value ? "var(--parchment)" : "var(--text-muted)",
+                fontWeight: localData.kind === value ? 650 : 500,
+                transition: "border-color 0.15s, background 0.15s, color 0.15s",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="form-hint">
+          Food items can appear on meals. Household items stay on pantry and shopping only.
+        </p>
+      </div>
+
+      <div className="form-group">
         <div style={{ display: "grid", gap: "0.5rem" }}>
           {([
             { key: "optional", label: "Optional (in recipes)", color: "var(--gold)" },
@@ -274,7 +309,9 @@ function IngredientForm({
                 border: localData[key] ? `1.5px solid ${color}` : "1.5px solid var(--app-border)",
                 background: localData[key] ? "rgba(201,168,76,0.06)" : "rgba(255,255,255,0.02)",
                 transition: "border-color 0.15s, background 0.15s",
+                opacity: localData.kind === "household" && key === "optional" ? 0.45 : 1,
               }}
+              disabled={localData.kind === "household" && key === "optional"}
             >
               <span style={{
                 width: 18, height: 18, borderRadius: 5, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
@@ -439,6 +476,9 @@ function IngredientView({ item, onEdit, onDelete }: IngredientViewProps) {
           {item.name}
         </h3>
         <div style={{ display: "flex", justifyContent: "center", gap: "0.375rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+          <span style={{ fontSize: "0.65rem", background: item.kind === "household" ? "#eef2ff" : "#f0fdf4", color: item.kind === "household" ? "#4338ca" : "#166534", padding: "0.2rem 0.5rem", borderRadius: 999, fontFamily: "DM Sans, monospace", fontWeight: 700 }}>
+            {item.kind === "household" ? "Household" : "Food"}
+          </span>
           {item.pantryStaple && (
             <span style={{ fontSize: "0.65rem", background: "#e8f5ee", color: "var(--protein-color)", padding: "0.2rem 0.5rem", borderRadius: 999, fontFamily: "DM Sans, monospace", fontWeight: 700 }}>
               Staple
@@ -447,11 +487,6 @@ function IngredientView({ item, onEdit, onDelete }: IngredientViewProps) {
           {item.optional && (
             <span style={{ fontSize: "0.65rem", background: "var(--gold-light)", color: "var(--gold)", padding: "0.2rem 0.5rem", borderRadius: 999, fontFamily: "DM Sans, monospace", fontWeight: 700 }}>
               Optional
-            </span>
-          )}
-          {!item.pantryStaple && !item.optional && (
-            <span style={{ fontSize: "0.65rem", background: "var(--app-bg)", color: "var(--text-muted)", padding: "0.2rem 0.5rem", borderRadius: 999, fontFamily: "DM Sans, monospace", fontWeight: 700 }}>
-              Standard
             </span>
           )}
         </div>
@@ -492,6 +527,7 @@ function IngredientCard({ item, isSelected, onSelect }: {
   onSelect: (i: IngredientCatalog) => void;
 }) {
   const badges: Array<{ label: string; bg: string; fg: string }> = [];
+  if (item.kind === "household") badges.push({ label: "household", bg: "#eef2ff", fg: "#4338ca" });
   if (item.pantryStaple) badges.push({ label: "staple", bg: "#e8f5ee", fg: "var(--protein-color)" });
   if (item.optional) badges.push({ label: "optional", bg: "var(--gold-light)", fg: "var(--gold)" });
 

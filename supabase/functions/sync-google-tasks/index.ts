@@ -19,6 +19,9 @@ const DEFAULT_STORE_NAME_MAP: Record<string, string> = {
   iga: "IGA",
 };
 
+/** Store used when a task title has no " from [store]" suffix. */
+const DEFAULT_TASK_STORE = "Coles";
+
 // --- Types ---
 
 interface GeminiProduct {
@@ -183,16 +186,49 @@ const normalizeStoreName = (listTitle: string, storeNameMap: Record<string, stri
 const FROM_STORE_PATTERN = /\s+from\s+(.+)$/i;
 
 interface ParsedTask {
-  productName: string;
+  productNames: string[];
   store: string;
   storeFromTitle: boolean;
 }
 
 /**
- * Parse a Google Task title into product + store.
+ * Split the product portion of a task into one or more item names.
+ * - "lettuce, cordial, Almond meal" → comma-separated (multi-word segments OK)
+ * - "lettuce cordial electrolytes" → space-separated when 3+ single-word tokens
+ *   and none of the tokens match the store name (avoids splitting product titles)
+ * - "Coles Raspberry Cordial" / "Almond meal" → kept as one item
+ */
+const splitProductNames = (productPart: string, store?: string): string[] => {
+  const trimmed = productPart.trim();
+  if (!trimmed) return [];
+
+  if (/[,;]/.test(trimmed)) {
+    return trimmed.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  const bySpace = trimmed.split(/\s+/).filter(Boolean);
+  if (bySpace.length >= 3) {
+    const storeLower = store?.trim().toLowerCase();
+    const mentionsStore = storeLower
+      ? bySpace.some((word) => word.toLowerCase() === storeLower)
+      : false;
+    if (!mentionsStore) {
+      return bySpace;
+    }
+  }
+
+  return [trimmed];
+};
+
+/**
+ * Parse a Google Task title into product name(s) + store.
  * When the title contains " from [store]", the store suffix wins over the list name
  * (supports a single generic Tasks list). Known store aliases are normalized via
  * storeNameMap; unknown stores keep the raw text after "from".
+ *
+ * Multiple items in one task:
+ *   "lettuce cordial electrolytes from Coles"  → 3 items
+ *   "lettuce, cordial, Almond meal from Coles" → 3 items (comma for multi-word names)
  */
 const parseTaskTitle = (
   title: string,
@@ -202,21 +238,37 @@ const parseTaskTitle = (
   const trimmed = title.trim();
   const match = trimmed.match(FROM_STORE_PATTERN);
   if (match && match.index != null) {
-    const productName = trimmed.slice(0, match.index).trim();
+    const productPart = trimmed.slice(0, match.index).trim();
     const rawStore = match[1].trim();
-    if (productName && rawStore) {
+    const normalizedStore = normalizeStoreName(rawStore, storeNameMap);
+    const productNames = splitProductNames(productPart, normalizedStore);
+    if (productNames.length > 0 && rawStore) {
       return {
-        productName,
-        store: normalizeStoreName(rawStore, storeNameMap),
+        productNames,
+        store: normalizedStore,
         storeFromTitle: true,
       };
     }
   }
   return {
-    productName: trimmed,
+    productNames: splitProductNames(trimmed, listStore),
     store: listStore,
     storeFromTitle: false,
   };
+};
+
+/**
+ * Resolve the retailer store for a task.
+ * Titles with " from Woolworths" etc. use that store; otherwise defaults to Coles.
+ * DEFAULT_SYNC_STORE secret overrides the Coles default if set.
+ */
+const resolveItemStore = (
+  parsed: ParsedTask,
+  storeNameMap: Record<string, string>,
+): string => {
+  if (parsed.storeFromTitle) return parsed.store;
+  const configured = Deno.env.get("DEFAULT_SYNC_STORE")?.trim() || DEFAULT_TASK_STORE;
+  return normalizeStoreName(configured, storeNameMap);
 };
 
 const deleteTask = async (token: string, listId: string, taskId: string): Promise<void> => {
@@ -244,6 +296,56 @@ const lookupExistingProduct = async (
     .limit(1)
     .maybeSingle();
   return (data as StoreProductRow | null) ?? null;
+};
+
+/** Best-effort extraction when LLM JSON is truncated or wrapped in prose. */
+const parseEnrichmentPayload = (
+  text: string,
+  productName: string,
+  store: string,
+): GeminiProduct | null => {
+  let jsonStr = String(text);
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1];
+  } else {
+    const objMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (objMatch) jsonStr = objMatch[0];
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr.trim());
+    return {
+      name: String(parsed.name ?? productName).trim(),
+      brand: parsed.brand ? String(parsed.brand).trim() : null,
+      price: typeof parsed.price === "number" ? parsed.price : null,
+      unit: parsed.unit ? String(parsed.unit).trim() : null,
+      url: parsed.url ? String(parsed.url).trim() : null,
+      image_url: parsed.image_url ? String(parsed.image_url).trim() : null,
+      category: parsed.category ? String(parsed.category).trim() : null,
+      store,
+      enriched: true,
+    };
+  } catch {
+    const pick = (key: string): string | null => {
+      const m = jsonStr.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+      return m ? m[1].replace(/\\"/g, '"').trim() : null;
+    };
+    const name = pick("name");
+    if (!name) return null;
+    const priceRaw = jsonStr.match(/"price"\s*:\s*(\d+(?:\.\d+)?)/);
+    return {
+      name,
+      brand: pick("brand"),
+      price: priceRaw ? Number(priceRaw[1]) : null,
+      unit: pick("unit"),
+      url: pick("url"),
+      image_url: pick("image_url"),
+      category: pick("category"),
+      store,
+      enriched: true,
+    };
+  }
 };
 
 // --- Claude Enrichment ---
@@ -300,7 +402,7 @@ Find the best matching product listing on ${store} Australia and return ONLY a J
   "unit": "pack size or weight e.g. 500g, 6 pack",
   "url": "direct product URL on ${store.toLowerCase()}.com.au",
   "image_url": "product image URL or null",
-  "category": "e.g. Cleaning, Dairy, Bakery, Pantry"
+  "category": "e.g. Cleaning, Household, Dairy, Bakery, Pantry"
 }`,
       }],
     }),
@@ -323,36 +425,15 @@ Find the best matching product listing on ${store} Australia and return ONLY a J
   const text = textBlock?.text ?? "{}";
   log(`[claude] ${store} raw text: ${String(text).slice(0, 300)}`, "debug", { store, product_name: productName });
 
-  try {
-    // Extract JSON: try code fence first, then first {...} block
-    let jsonStr = String(text);
-    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenceMatch) {
-      jsonStr = fenceMatch[1];
-    } else {
-      const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-      if (objMatch) jsonStr = objMatch[0];
-    }
-    const parsed = JSON.parse(jsonStr.trim());
-    return {
-      name: String(parsed.name ?? productName).trim(),
-      brand: parsed.brand ? String(parsed.brand).trim() : null,
-      price: typeof parsed.price === "number" ? parsed.price : null,
-      unit: parsed.unit ? String(parsed.unit).trim() : null,
-      url: parsed.url ? String(parsed.url).trim() : null,
-      image_url: parsed.image_url ? String(parsed.image_url).trim() : null,
-      category: parsed.category ? String(parsed.category).trim() : null,
-      store,
-      enriched: true,
-    };
-  } catch (e) {
-    log(
-      `[claude] ${store} JSON parse error: ${e}`,
-      "error",
-      { store, product_name: productName, error: String(e), raw_preview: String(text).slice(0, 300) }
-    );
-    return fallback;
-  }
+  const parsed = parseEnrichmentPayload(String(text), productName, store);
+  if (parsed) return parsed;
+
+  log(
+    `[claude] ${store} could not extract product JSON`,
+    "error",
+    { store, product_name: productName, raw_preview: String(text).slice(0, 300) },
+  );
+  return fallback;
 };
 
 // --- Gemini Enrichment (Fallback) ---
@@ -408,7 +489,7 @@ Return ONLY a JSON object (no markdown/backticks/explanations) in this exact sha
   "unit": "pack size or weight e.g. 500g, 6 pack",
   "url": "direct product URL on the store website if found, otherwise null",
   "image_url": "product image URL or null",
-  "category": "e.g. Cleaning, Dairy, Bakery, Pantry"
+  "category": "e.g. Cleaning, Household, Dairy, Bakery, Pantry"
 }`,
         }],
       }],
@@ -436,35 +517,15 @@ Return ONLY a JSON object (no markdown/backticks/explanations) in this exact sha
     ?? "{}";
   log(`[gemini] ${store} raw text: ${String(text).slice(0, 300)}`, "debug", { store, product_name: productName });
 
-  try {
-    let jsonStr = String(text);
-    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenceMatch) {
-      jsonStr = fenceMatch[1];
-    } else {
-      const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-      if (objMatch) jsonStr = objMatch[0];
-    }
-    const parsed = JSON.parse(jsonStr.trim());
-    return {
-      name: String(parsed.name ?? productName).trim(),
-      brand: parsed.brand ? String(parsed.brand).trim() : null,
-      price: typeof parsed.price === "number" ? parsed.price : null,
-      unit: parsed.unit ? String(parsed.unit).trim() : null,
-      url: parsed.url ? String(parsed.url).trim() : null,
-      image_url: parsed.image_url ? String(parsed.image_url).trim() : null,
-      category: parsed.category ? String(parsed.category).trim() : null,
-      store,
-      enriched: true,
-    };
-  } catch (e) {
-    log(
-      `[gemini] ${store} JSON parse error: ${e}`,
-      "error",
-      { store, product_name: productName, error: String(e), raw_preview: String(text).slice(0, 300) }
-    );
-    return fallback;
-  }
+  const parsed = parseEnrichmentPayload(String(text), productName, store);
+  if (parsed) return parsed;
+
+  log(
+    `[gemini] ${store} could not extract product JSON`,
+    "error",
+    { store, product_name: productName, raw_preview: String(text).slice(0, 300) },
+  );
+  return fallback;
 };
 
 // --- Collect Candidate ---
@@ -581,21 +642,38 @@ const selectDefault = (candidates: Candidate[]): Candidate | null => {
 
 // --- Ingredient Resolution ---
 
+const HOUSEHOLD_CATEGORY_PATTERN =
+  /\b(cleaning|household|hardware|garden|bathroom|laundry|toiletries|personal\s*care|bunnings|diy|home\s*care|pet\s*care)\b/i;
+
+const kindFromCategory = (category: string | null | undefined): "food" | "household" => {
+  if (!category) return "food";
+  return HOUSEHOLD_CATEGORY_PATTERN.test(category) ? "household" : "food";
+};
+
 const resolveIngredient = async (
   supabase: AnySupabaseClient,
-  name: string
+  name: string,
+  category?: string | null,
 ): Promise<string | null> => {
+  const kind = kindFromCategory(category);
   const { data: existing } = await supabase
     .from("ingredients")
-    .select("id")
+    .select("id, kind")
     .ilike("name", name.trim())
     .maybeSingle();
 
-  if (existing) return (existing as { id: string }).id;
+  if (existing) {
+    const row = existing as { id: string; kind: string | null };
+    // Promote food → household when enrichment says non-food; never demote.
+    if (kind === "household" && row.kind !== "household") {
+      await supabase.from("ingredients").update({ kind: "household" }).eq("id", row.id);
+    }
+    return row.id;
+  }
 
   const { data: created, error } = await supabase
     .from("ingredients")
-    .insert({ name: name.trim(), optional: false, pantry_staple: false })
+    .insert({ name: name.trim(), optional: false, pantry_staple: false, kind })
     .select("id")
     .single();
 
@@ -818,6 +896,171 @@ const upsertTripItemForProduct = async (
   }
 };
 
+/** Add a trip line from the raw task text when product enrichment is unavailable. */
+const upsertTripItemByName = async (
+  supabase: AnySupabaseClient,
+  tripId: string,
+  productName: string,
+  log: LogFn,
+): Promise<boolean> => {
+  const { data: existing, error: findErr } = await supabase
+    .from("shopping_trip_items")
+    .select("id, quantity_purchased")
+    .eq("shopping_trip_id", tripId)
+    .is("store_product_id", null)
+    .ilike("ingredient_name", productName)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (findErr) {
+    log(
+      `[sync] "${productName}": shopping_trip_items lookup error: ${JSON.stringify(findErr)}`,
+      "error",
+      { title: productName, table: "shopping_trip_items", trip_id: tripId, error: findErr },
+    );
+    return false;
+  }
+
+  if (existing) {
+    const row = existing as { id: string; quantity_purchased: number | null };
+    const nextQuantity = Math.max(1, Number(row.quantity_purchased ?? 0) + 1);
+    const { error: updErr } = await supabase
+      .from("shopping_trip_items")
+      .update({ quantity_purchased: nextQuantity })
+      .eq("id", row.id);
+    if (updErr) {
+      log(
+        `[sync] "${productName}": shopping_trip_items quantity update error: ${JSON.stringify(updErr)}`,
+        "error",
+        { title: productName, table: "shopping_trip_items", trip_id: tripId, row_id: row.id, error: updErr },
+      );
+      return false;
+    }
+    return true;
+  }
+
+  const { error: tiErr } = await supabase.from("shopping_trip_items").insert({
+    shopping_trip_id: tripId,
+    product_name: productName,
+    ingredient_name: productName,
+    quantity_purchased: 1,
+    pack_quantity: null,
+    pack_unit: null,
+    store_product_id: null,
+  });
+  if (tiErr) {
+    log(
+      `[sync] "${productName}": shopping_trip_items insert error: ${JSON.stringify(tiErr)}`,
+      "error",
+      { title: productName, table: "shopping_trip_items", trip_id: tripId, error: tiErr },
+    );
+    return false;
+  }
+
+  log(
+    `[sync] "${productName}": added unenriched shopping_trip_items row (trip=${tripId})`,
+    "info",
+    { title: productName, trip_id: tripId, enriched: false },
+  );
+  return true;
+};
+
+/** Sync one parsed product name from a Google Task into store_products + trip. */
+const processTaskProduct = async (
+  supabase: AnySupabaseClient,
+  params: {
+    taskTitle: string;
+    productName: string;
+    itemStore: string;
+    syncUserId: string | null;
+    tripId: string | null;
+    log: LogFn;
+  },
+): Promise<boolean> => {
+  const { taskTitle, productName, itemStore, syncUserId, tripId, log } = params;
+
+  const rawCandidate = await collectCandidate(supabase, productName, itemStore, log);
+  if (!rawCandidate) {
+    if (tripId) {
+      const added = await upsertTripItemByName(supabase, tripId, productName, log);
+      if (added) {
+        log(
+          `[sync] "${taskTitle}" → "${productName}": added without enrichment`,
+          "warn",
+          { store: itemStore, title: taskTitle, product_name: productName, reason: "unenriched_fallback" },
+        );
+        return true;
+      }
+    }
+    log(
+      `[sync] "${taskTitle}" → "${productName}": skipping — no candidate found`,
+      "warn",
+      { store: itemStore, title: taskTitle, product_name: productName, reason: "no_candidate" },
+    );
+    return false;
+  }
+
+  const candidate = await persistCandidate(supabase, rawCandidate, log);
+  if (!candidate) {
+    log(
+      `[sync] "${taskTitle}" → "${productName}": skipping — store_products persist failed`,
+      "warn",
+      { store: itemStore, title: taskTitle, product_name: productName, reason: "persist_failed" },
+    );
+    return false;
+  }
+
+  const ingredientId = await resolveIngredient(supabase, productName, candidate.category);
+  log(
+    `[sync] "${taskTitle}" → "${productName}": ingredientId=${ingredientId}`,
+    "info",
+    { store: itemStore, title: taskTitle, product_name: productName, ingredient_id: ingredientId },
+  );
+  if (ingredientId) {
+    await persistIngredientPreferences(supabase, ingredientId, candidate.id, []);
+  }
+
+  const { error: insertErr } = await supabase.from("shopping_list_items").insert({
+    user_id: syncUserId,
+    raw_name: taskTitle,
+    name: candidate.name,
+    brand: candidate.brand ?? null,
+    price: candidate.price ?? null,
+    unit: candidate.size_label ?? null,
+    url: candidate.product_url ?? null,
+    image_url: candidate.image_url ?? null,
+    category: candidate.category ?? null,
+    store: candidate.store,
+    source: "google_tasks",
+    enriched: true,
+  });
+  if (insertErr) {
+    log(
+      `[sync] "${taskTitle}" → "${productName}": shopping_list_items insert error: ${JSON.stringify(insertErr)}`,
+      "error",
+      { store: itemStore, title: taskTitle, product_name: productName, table: "shopping_list_items", error: insertErr },
+    );
+  }
+
+  if (tripId) {
+    await upsertTripItemForProduct(supabase, tripId, productName, candidate, log);
+  } else if (syncUserId) {
+    log(
+      `[sync] "${taskTitle}" → "${productName}": no trip available — skipping shopping_trip_items insert`,
+      "warn",
+      { store: itemStore, title: taskTitle, product_name: productName, reason: "no_trip" },
+    );
+  }
+
+  log(
+    `[sync] "${taskTitle}" → "${productName}": processed OK`,
+    "info",
+    { store: itemStore, title: taskTitle, product_name: productName },
+  );
+  return true;
+};
+
 // --- Logging ---
 // `log` writes to three sinks:
 //   1. console (so Supabase's built-in function log viewer still picks it up),
@@ -953,86 +1196,57 @@ Deno.serve(async () => {
       if (!title) { skipped++; continue; }
 
       const parsed = parseTaskTitle(title, store, storeNameMap);
-      const { productName, store: itemStore, storeFromTitle } = parsed;
+      const { productNames, storeFromTitle } = parsed;
+      if (productNames.length === 0) { skipped++; continue; }
+
+      const itemStore = resolveItemStore(parsed, storeNameMap);
+
       log(
-        `[sync] Processing task: "${title}" → product="${productName}" store=${itemStore} (list=${store}, fromTitle=${storeFromTitle}, id=${task.id})`,
+        `[sync] Processing task: "${title}" → products=${JSON.stringify(productNames)} store=${itemStore} (list=${store}, fromTitle=${storeFromTitle}, id=${task.id})`,
         "info",
-        { list_store: store, item_store: itemStore, title, product_name: productName, store_from_title: storeFromTitle, task_id: task.id }
+        {
+          list_store: store,
+          item_store: itemStore,
+          title,
+          product_names: productNames,
+          store_from_title: storeFromTitle,
+          task_id: task.id,
+        },
       );
 
       try {
-        // 1. Lookup existing store_products for this store, or enrich via Claude
-        const rawCandidate = await collectCandidate(supabase, productName, itemStore, log);
-        if (!rawCandidate) {
-          log(`[sync] "${title}": skipping — no candidate found`, "warn", { store: itemStore, title, product_name: productName, reason: "no_candidate" });
-          skipped++;
-          continue;
-        }
-
-        // 2. Persist to store_products if new
-        const candidate = await persistCandidate(supabase, rawCandidate, log);
-        if (!candidate) {
-          log(`[sync] "${title}": skipping — store_products persist failed`, "warn", { store: itemStore, title, reason: "persist_failed" });
-          skipped++;
-          continue;
-        }
-
-        // 3. Resolve or create ingredient, then save as default product
-        const ingredientId = await resolveIngredient(supabase, productName);
-        log(`[sync] "${title}": ingredientId=${ingredientId}`, "info", { store: itemStore, title, product_name: productName, ingredient_id: ingredientId });
-        if (ingredientId) {
-          await persistIngredientPreferences(supabase, ingredientId, candidate.id, []);
-        }
-
-        // 4. Record to shopping_list_items (enriched archive log)
-        const { error: insertErr } = await supabase.from("shopping_list_items").insert({
-          user_id: syncUserId,
-          raw_name: title,
-          name: candidate.name,
-          brand: candidate.brand ?? null,
-          price: candidate.price ?? null,
-          unit: candidate.size_label ?? null,
-          url: candidate.product_url ?? null,
-          image_url: candidate.image_url ?? null,
-          category: candidate.category ?? null,
-          store: candidate.store,
-          source: "google_tasks",
-          enriched: true,
-        });
-        if (insertErr) {
-          log(
-            `[sync] "${title}": shopping_list_items insert error: ${JSON.stringify(insertErr)}`,
-            "error",
-            { store: itemStore, title, table: "shopping_list_items", error: insertErr }
-          );
-        }
-
-        // 5. Insert/update shopping_trip_items under the open trip for this item's store.
-        //    The user marks the item purchased from the Shopping page Trip
-        //    section, which inserts a shopping_list row with quantity+unit and
-        //    fires the purchase trigger that credits the Pantry.
         const tripId = await resolveTripId(itemStore);
-        if (tripId) {
-          await upsertTripItemForProduct(supabase, tripId, productName, candidate, log);
-        } else if (syncUserId) {
-          log(
-            `[sync] "${title}": no trip available — skipping shopping_trip_items insert`,
-            "warn",
-            { store: itemStore, title, reason: "no_trip" }
-          );
+        let allOk = true;
+        for (const productName of productNames) {
+          const ok = await processTaskProduct(supabase, {
+            taskTitle: title,
+            productName,
+            itemStore,
+            syncUserId,
+            tripId,
+            log,
+          });
+          if (!ok) allOk = false;
         }
 
-        // Delete task only after successful processing
-        await deleteTask(token, listId, task.id);
-        processed++;
-        log(`[sync] "${title}": processed OK`, "info", { store: itemStore, title, product_name: productName });
+        if (allOk) {
+          await deleteTask(token, listId, task.id);
+          processed += productNames.length;
+        } else {
+          skipped += productNames.length;
+          log(
+            `[sync] "${title}": kept in Google Tasks — one or more products failed`,
+            "warn",
+            { store: itemStore, title, product_names: productNames, reason: "partial_failure" },
+          );
+        }
       } catch (e) {
         log(
           `[sync] "${title}": EXCEPTION: ${e}`,
           "error",
-          { store: itemStore, title, task_id: task?.id, error: String(e) }
+          { store: itemStore, title, task_id: task?.id, error: String(e) },
         );
-        skipped++;
+        skipped += productNames.length;
       }
     }
   }
