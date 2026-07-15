@@ -161,7 +161,7 @@ function AddStockModal({ ingredientName, onClose, onAdded }: AddStockModalProps)
             items={ingredients}
             selectedKey={name}
             getKey={(i) => i.name}
-            getLabel={(i) => i.name}
+            getLabel={(i) => i.kind === 'household' ? `${i.name} (household)` : i.name}
             onSelectKey={(key) => {
               setName(key);
               setSelectedProductId(null);
@@ -288,6 +288,68 @@ export default function PantryPage() {
   };
 
   const hasItems = items.length > 0;
+  const foodItems = useMemo(() => items.filter((i) => i.kind !== 'household'), [items]);
+  const householdItems = useMemo(() => items.filter((i) => i.kind === 'household'), [items]);
+
+  const renderPantryCard = (item: PantryItem) => {
+    const remaining = Math.max(0, item.remainingQty);
+    const totalPurchased = Math.max(0, item.totalPurchased);
+    const pct =
+      totalPurchased > 0
+        ? Math.max(0, Math.min(100, Math.round((remaining / totalPurchased) * 100)))
+        : 100;
+
+    return (
+      <div key={item.id} className="app-card pantry-item-card">
+        <div className="pantry-item-inner">
+          <div className="pantry-item-header">
+            <div className="pantry-item-name" title={item.ingredientName}>
+              {item.ingredientName}
+            </div>
+            <div className="pantry-item-badge">bought {daysSince(item.lastPurchaseDate)}</div>
+          </div>
+
+          <div className="pantry-item-progress">
+            <div className="pantry-progress-track" aria-hidden="true">
+              <div className="pantry-progress-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="pantry-item-qty">
+              {remaining}{item.unit} remaining of {totalPurchased}{item.unit} purchased
+            </div>
+          </div>
+
+          {item.purchaseBreakdowns.length > 0 && (
+            <div className="pantry-item-breakdown">
+              <span className="pantry-breakdown-label">Purchased from:</span>{' '}
+              {item.purchaseBreakdowns.map((b, idx) => (
+                <span key={idx} className="pantry-breakdown-item">
+                  {formatPurchaseBreakdown(b)}{idx < item.purchaseBreakdowns.length - 1 ? '; ' : ''}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="pantry-item-actions">
+            <button className="btn-app-ghost" onClick={() => setAddingFor(item.ingredientName)}>
+              + Add stock
+            </button>
+            <button className="btn-app-ghost" onClick={() => setEditingProductsFor(item.ingredientName)}>
+              Edit products
+            </button>
+            <label className="pantry-auto-toggle">
+              <input
+                type="checkbox"
+                checked={item.autoReorder}
+                onChange={() => handleToggle(item)}
+                style={{ accentColor: 'var(--protein-color)' }}
+              />
+              <span>Auto-reorder</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -324,66 +386,23 @@ export default function PantryPage() {
           </div>
         </div>
       ) : (
-        <div className="pantry-grid">
-          {items.map(item => {
-            const remaining = Math.max(0, item.remainingQty);
-            const totalPurchased = Math.max(0, item.totalPurchased);
-            const pct =
-              totalPurchased > 0
-                ? Math.max(0, Math.min(100, Math.round((remaining / totalPurchased) * 100)))
-                : 100;
-
-            return (
-              <div key={item.id} className="app-card pantry-item-card">
-                <div className="pantry-item-inner">
-                  <div className="pantry-item-header">
-                    <div className="pantry-item-name" title={item.ingredientName}>
-                      {item.ingredientName}
-                    </div>
-                    <div className="pantry-item-badge">bought {daysSince(item.lastPurchaseDate)}</div>
-                  </div>
-
-                  <div className="pantry-item-progress">
-                    <div className="pantry-progress-track" aria-hidden="true">
-                      <div className="pantry-progress-fill" style={{ width: `${pct}%` }} />
-                    </div>
-                    <div className="pantry-item-qty">
-                      {remaining}{item.unit} remaining of {totalPurchased}{item.unit} purchased
-                    </div>
-                  </div>
-
-                  {item.purchaseBreakdowns.length > 0 && (
-                    <div className="pantry-item-breakdown">
-                      <span className="pantry-breakdown-label">Purchased from:</span>{' '}
-                      {item.purchaseBreakdowns.map((b, idx) => (
-                        <span key={idx} className="pantry-breakdown-item">
-                          {formatPurchaseBreakdown(b)}{idx < item.purchaseBreakdowns.length - 1 ? '; ' : ''}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="pantry-item-actions">
-                    <button className="btn-app-ghost" onClick={() => setAddingFor(item.ingredientName)}>
-                      + Add stock
-                    </button>
-                    <button className="btn-app-ghost" onClick={() => setEditingProductsFor(item.ingredientName)}>
-                      Edit products
-                    </button>
-                    <label className="pantry-auto-toggle">
-                      <input
-                        type="checkbox"
-                        checked={item.autoReorder}
-                        onChange={() => handleToggle(item)}
-                        style={{ accentColor: 'var(--protein-color)' }}
-                      />
-                      <span>Auto-reorder</span>
-                    </label>
-                  </div>
-                </div>
+        <div style={{ display: 'grid', gap: '1.75rem' }}>
+          {foodItems.length > 0 && (
+            <section>
+              <h2 className="pantry-section-title">Food</h2>
+              <div className="pantry-grid">
+                {foodItems.map(renderPantryCard)}
               </div>
-            );
-          })}
+            </section>
+          )}
+          {householdItems.length > 0 && (
+            <section>
+              <h2 className="pantry-section-title">Household</h2>
+              <div className="pantry-grid">
+                {householdItems.map(renderPantryCard)}
+              </div>
+            </section>
+          )}
         </div>
       )}
 
@@ -406,6 +425,16 @@ export default function PantryPage() {
       )}
 
       <style>{`
+        .pantry-section-title {
+          margin: 0 0 0.75rem;
+          font-family: 'DM Sans, monospace';
+          font-size: 0.7rem;
+          font-weight: 700;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--text-subtle);
+        }
+
         .pantry-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -586,6 +615,7 @@ function EditIngredientProductsModal({
         name: ingredient.name,
         optional: ingredient.optional,
         pantryStaple: ingredient.pantryStaple,
+        kind: ingredient.kind,
         defaultStoreProductId,
       });
       await saveIngredientProductPreferences({
@@ -612,6 +642,7 @@ function EditIngredientProductsModal({
         name: ingredient.name,
         optional: ingredient.optional,
         pantryStaple: ingredient.pantryStaple,
+        kind: ingredient.kind,
         defaultStoreProductId: null,
       });
       await saveIngredientProductPreferences({

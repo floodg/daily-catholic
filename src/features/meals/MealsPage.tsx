@@ -26,7 +26,9 @@ export default function MealsPage() {
           a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
         );
         setMeals(sorted);
-        setPantryIngredientNames(list.map((i) => i.name));
+        setPantryIngredientNames(
+          list.filter((i) => i.kind === 'food').map((i) => i.name)
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }

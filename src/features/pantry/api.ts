@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase';
-import type { MeasurementUnitCode } from '../../domain/types';
+import type { IngredientKind, MeasurementUnitCode } from '../../domain/types';
 import { createInventoryTransaction } from '../inventory/api';
 
 export interface PurchaseBreakdown {
@@ -20,6 +20,7 @@ export interface PantryItem {
   lastPurchaseDate?: string;
   autoReorder: boolean;
   purchaseBreakdowns: PurchaseBreakdown[];
+  kind: IngredientKind;
 }
 
 interface RpcRow {
@@ -31,6 +32,7 @@ interface RpcRow {
   auto_reorder: boolean;
   last_purchase_date: string | null;
   purchase_breakdowns: PurchaseBreakdown[];
+  kind: string | null;
 }
 
 async function getCurrentUserId(): Promise<string> {
@@ -53,6 +55,7 @@ function rpcToDomain(userId: string, row: RpcRow): PantryItem {
     lastPurchaseDate: row.last_purchase_date ?? undefined,
     autoReorder: Boolean(row.auto_reorder),
     purchaseBreakdowns: breakdowns,
+    kind: row.kind === 'household' ? 'household' : 'food',
   };
 }
 

@@ -1,10 +1,11 @@
 import { supabase } from '../../lib/supabase';
-import type { MeasurementUnitCode } from '../../domain/types';
+import type { IngredientKind, MeasurementUnitCode } from '../../domain/types';
 
 export interface IngredientFlagsInput {
   name: string;
   optional?: boolean;
   pantryStaple?: boolean;
+  kind?: IngredientKind;
 }
 
 /**
@@ -19,6 +20,7 @@ export async function upsertIngredientFlags(
     name: i.name,
     optional: i.optional ?? false,
     pantry_staple: i.pantryStaple ?? false,
+    kind: i.kind ?? 'food',
   }));
   const { error } = await supabase
     .from('ingredients')
@@ -33,6 +35,7 @@ export interface IngredientCatalog {
   name: string;
   optional: boolean;
   pantryStaple: boolean;
+  kind: IngredientKind;
   defaultStoreProductId: string | null;
   defaultStoreProductName: string | null;
   defaultStoreProductStore: string | null;
@@ -73,6 +76,7 @@ interface DbRow {
   name: string;
   optional: boolean;
   pantry_staple: boolean;
+  kind: IngredientKind | null;
   default_store_product_id: string | null;
   created_at: string;
   store_products?: StoreProductRef | StoreProductRef[] | null;
@@ -134,6 +138,7 @@ function dbToCatalog(row: DbRow): IngredientCatalog {
     name: row.name,
     optional: row.optional,
     pantryStaple: row.pantry_staple,
+    kind: row.kind === 'household' ? 'household' : 'food',
     defaultStoreProductId: row.default_store_product_id,
     defaultStoreProductName: defaultLabel || null,
     defaultStoreProductStore: ref?.store ?? null,
@@ -206,6 +211,7 @@ export async function getIngredientsCatalog(): Promise<IngredientCatalog[]> {
       name,
       optional,
       pantry_staple,
+      kind,
       default_store_product_id,
       created_at,
       store_products:default_store_product_id ( name, brand, store, product_url, size_label, size_value, size_unit_code )
@@ -225,6 +231,7 @@ export async function createIngredient(payload: {
   name: string;
   optional?: boolean;
   pantryStaple?: boolean;
+  kind?: IngredientKind;
   defaultStoreProductId?: string | null;
 }): Promise<IngredientCatalog> {
   const { data, error } = await supabase
@@ -233,6 +240,7 @@ export async function createIngredient(payload: {
       name: payload.name.trim(),
       optional: payload.optional ?? false,
       pantry_staple: payload.pantryStaple ?? false,
+      kind: payload.kind ?? 'food',
       default_store_product_id: payload.defaultStoreProductId ?? null,
     })
     .select(`
@@ -240,6 +248,7 @@ export async function createIngredient(payload: {
       name,
       optional,
       pantry_staple,
+      kind,
       default_store_product_id,
       created_at,
       store_products:default_store_product_id ( name, brand, store, product_url, size_label, size_value, size_unit_code )
@@ -258,6 +267,7 @@ export async function updateIngredient(payload: {
   name: string;
   optional?: boolean;
   pantryStaple?: boolean;
+  kind?: IngredientKind;
   defaultStoreProductId?: string | null;
 }): Promise<IngredientCatalog> {
   const { data, error } = await supabase
@@ -266,6 +276,7 @@ export async function updateIngredient(payload: {
       name: payload.name.trim(),
       optional: payload.optional ?? false,
       pantry_staple: payload.pantryStaple ?? false,
+      kind: payload.kind ?? 'food',
       default_store_product_id: payload.defaultStoreProductId ?? null,
     })
     .eq('id', payload.id)
@@ -274,6 +285,7 @@ export async function updateIngredient(payload: {
       name,
       optional,
       pantry_staple,
+      kind,
       default_store_product_id,
       created_at,
       store_products:default_store_product_id ( name, brand, store, product_url, size_label, size_value, size_unit_code )
