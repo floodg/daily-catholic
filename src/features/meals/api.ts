@@ -4,6 +4,16 @@ import { formatQuantity, parseQuantity, isUnmeasuredQuantity } from '../shopping
 
 // ─── DB row shapes ────────────────────────────────────────────────────────────
 
+interface DbStoreProduct {
+  id: string;
+  name: string;
+  brand: string | null;
+  size_label: string | null;
+  store: string;
+  product_url: string | null;
+  image_url: string | null;
+}
+
 interface DbIngredient {
   id: string;
   meal_id: string;
@@ -16,6 +26,8 @@ interface DbIngredient {
   store: string | null;
   notes: string | null;
   sort_order: number;
+  store_product_id: string | null;
+  store_products: DbStoreProduct | null;
 }
 
 interface DbMeal {
@@ -31,16 +43,6 @@ interface DbMeal {
   created_at: string;
   updated_at: string;
   meal_ingredients: DbIngredient[];
-}
-
-interface DbStoreProduct {
-  id: string;
-  name: string;
-  brand: string | null;
-  size_label: string | null;
-  store: string;
-  product_url: string | null;
-  image_url: string | null;
 }
 
 interface DbProductOption {
@@ -103,8 +105,14 @@ function dbIngredientToDomain(ing: DbIngredient): Ingredient {
     unit,
     store: ing.store ?? undefined,
     notes: ing.notes ?? undefined,
+    primaryProduct: ing.store_products
+      ? dbStoreProductToDomain(ing.store_products)
+      : undefined,
   };
 }
+
+const MEAL_INGREDIENT_SELECT =
+  '*, store_products:store_product_id(*)';
 
 function dbMealToDomain(row: DbMeal): Meal {
   return {
@@ -247,7 +255,7 @@ export async function getStarterMealsNotImportedForUser(
 export async function getMealsForUser(): Promise<Meal[]> {
   const { data, error } = await supabase
     .from('meals')
-    .select('*, meal_ingredients(*)')
+    .select(`*, meal_ingredients(${MEAL_INGREDIENT_SELECT})`)
     .order('created_at', { ascending: true });
 
   if (error) throw error;
@@ -298,40 +306,20 @@ export async function getMealsForUser(): Promise<Meal[]> {
 
   return meals.map(meal => {
     const domainMeal = dbMealToDomain(meal);
-    if (!meal.source_starter_meal_id) return domainMeal;
-
-    const byName = productLookup.get(meal.source_starter_meal_id);
-    // Enrich each ingredient with product links and catalog flags
-    if (!byName) {
-      return {
-        ...domainMeal,
-        ingredients: domainMeal.ingredients.map(ing => {
-          const cat = catalogByName.get(ing.name.toLowerCase());
-          return {
-            ...ing,
-            optional: cat?.optional ?? false,
-            pantryStaple: cat?.pantry_staple ?? false,
-          };
-        }),
-      };
-    }
+    const byName = meal.source_starter_meal_id
+      ? productLookup.get(meal.source_starter_meal_id)
+      : undefined;
 
     return {
       ...domainMeal,
       ingredients: domainMeal.ingredients.map(ing => {
-        const starterIng = byName.get(ing.name.toLowerCase());
         const cat = catalogByName.get(ing.name.toLowerCase());
-        if (!starterIng) {
-          return {
-            ...ing,
-            optional: cat?.optional ?? false,
-            pantryStaple: cat?.pantry_staple ?? false,
-          };
-        }
+        const starterIng = byName?.get(ing.name.toLowerCase());
+        // Meal-row product takes precedence over starter overlay
         return {
           ...ing,
-          primaryProduct: starterIng.primaryProduct,
-          productOptions: starterIng.productOptions,
+          primaryProduct: ing.primaryProduct ?? starterIng?.primaryProduct,
+          productOptions: ing.productOptions ?? starterIng?.productOptions,
           optional: cat?.optional ?? false,
           pantryStaple: cat?.pantry_staple ?? false,
         };
@@ -373,6 +361,7 @@ export async function createMeal(
           store: ing.store ?? null,
           notes: ing.notes ?? null,
           sort_order: idx,
+          store_product_id: ing.primaryProduct?.id ?? null,
         }))
       );
     if (ingError) throw ingError;
@@ -416,6 +405,7 @@ export async function updateMeal(meal: Meal): Promise<Meal> {
           store: ing.store ?? null,
           notes: ing.notes ?? null,
           sort_order: idx,
+          store_product_id: ing.primaryProduct?.id ?? null,
         }))
       );
     if (ingError) throw ingError;
@@ -432,7 +422,7 @@ export async function deleteMeal(id: string): Promise<void> {
 export async function getMealById(id: string): Promise<Meal> {
   const { data, error } = await supabase
     .from('meals')
-    .select('*, meal_ingredients(*)')
+    .select(`*, meal_ingredients(${MEAL_INGREDIENT_SELECT})`)
     .eq('id', id)
     .single();
 

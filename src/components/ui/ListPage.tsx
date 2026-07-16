@@ -29,6 +29,8 @@ interface ListPageProps<T extends ListItem> {
   /** What to render in the detail column when `panelOpen` is false */
   emptyDetail?: React.ReactNode
   addLabel?: string
+  /** Extra controls rendered beside the Add button in the header */
+  headerActions?: React.ReactNode
   emptyIcon?: string
   emptyText?: string
   /** Pre-select an item and open the panel in the given mode on first render */
@@ -50,6 +52,7 @@ export default function ListPage<T extends ListItem>({
   alwaysTwoColumn = false,
   emptyDetail,
   addLabel = 'Add New',
+  headerActions,
   emptyIcon = '📋',
   emptyText = 'No items yet',
   defaultSelected = null,
@@ -142,11 +145,16 @@ export default function ListPage<T extends ListItem>({
           {/* Safe: title is controlled by us, not user input */}
           <h1 className="page-title" dangerouslySetInnerHTML={{ __html: title }} />
         </div>
-        {showAddButton && (
-          <button className="btn-app-primary" onClick={handleAddNew}>
-            <Plus size={16} />
-            {addLabel}
-          </button>
+        {(headerActions || showAddButton) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {headerActions}
+            {showAddButton && (
+              <button className="btn-app-primary" onClick={handleAddNew}>
+                <Plus size={16} />
+                {addLabel}
+              </button>
+            )}
+          </div>
         )}
       </div>
 

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'rea
 import Layout from './app/Layout'
 import Dashboard from './features/Dashboard'
 import MealsPage from './features/meals/MealsPage'
+import CreateAiMealPage from './features/meals/CreateAiMealPage'
 import PlanPage from './features/plan/PlanPage'
 import WorkoutsPage from './features/workouts/WorkoutsPage'
 import ShoppingPage from './features/shopping/ShoppingPage'
@@ -100,6 +101,7 @@ function App() {
               </Route>
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="walking/:sessionId" element={<WalkDetailPage />} />
+              <Route path="meals/create-ai" element={<CreateAiMealPage />} />
               <Route path="meals" element={<MealsPage />} />
               <Route path="plan" element={<PlanPage />} />
               <Route path="training" element={<ProgramPage />} />
