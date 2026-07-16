@@ -55,6 +55,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/app/dashboard':           'Dashboard',
   '/app/walking':             'Walk Detail',
   '/app/plan':                'Weekly Plan',
+  '/app/meals/create-ai':     'Create with AI',
   '/app/meals':               'Meals',
   '/app/shopping':            'Shopping List',
   '/app/shopping-trips':      'Trip History',

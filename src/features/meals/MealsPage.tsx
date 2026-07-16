@@ -131,6 +131,15 @@ export default function MealsPage() {
           (meal.tags ?? []).some(t => t.toLowerCase().includes(q.toLowerCase()))
         }
         addLabel="Add Meal"
+        headerActions={
+          <Link
+            to="/app/meals/create-ai"
+            className="btn-app-secondary"
+            style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+          >
+            Create with AI
+          </Link>
+        }
         emptyIcon="🍽️"
         emptyText="No meals yet — add your first keto recipe!"
       />

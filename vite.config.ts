@@ -9,6 +9,7 @@ export default defineConfig({
   },
   server: {
     host: true,
+    port: 4761,
     allowedHosts: [
       "dallyingly-cisternal-loida.ngrok-free.dev"
     ]
