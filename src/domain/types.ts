@@ -57,6 +57,8 @@ export interface Meal {
   cookTimeMins?: number;
   /** Set when the meal was imported from a starter meal template */
   sourceStarterMealId?: string;
+  /** True when created via the Create with AI meals flow */
+  createdViaAi?: boolean;
 }
 
 export interface StarterMeal {

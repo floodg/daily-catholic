@@ -87,8 +87,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Always subscribe (even when logged out) so sign-in / sign-out on this tab still updates state.
       const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
-        if (event === 'TOKEN_REFRESHED') return
         setSession(nextSession)
+        if (event === 'TOKEN_REFRESHED') return
         if (nextSession?.user) {
           void fetchProfile(nextSession.user.id)
         } else {

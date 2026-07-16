@@ -125,6 +125,7 @@ export function draftToMealInput(draft: GenerateMealDraft): Omit<Meal, 'id'> {
     prepTimeMins: draft.prepTimeMins,
     cookTimeMins: draft.cookTimeMins,
     instructions: draft.instructions,
+    createdViaAi: true,
     ingredients: draft.ingredients.map((ing, idx) => ({
       ...ing,
       id: ing.id || `ing-${idx}`,

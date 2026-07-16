@@ -40,6 +40,7 @@ interface DbMeal {
   prep_time_mins: number | null;
   cook_time_mins: number | null;
   instructions: string[];
+  created_via_ai?: boolean;
   created_at: string;
   updated_at: string;
   meal_ingredients: DbIngredient[];
@@ -126,6 +127,7 @@ function dbMealToDomain(row: DbMeal): Meal {
     prepTimeMins: row.prep_time_mins ?? undefined,
     cookTimeMins: row.cook_time_mins ?? undefined,
     sourceStarterMealId: row.source_starter_meal_id ?? undefined,
+    createdViaAi: row.created_via_ai ?? false,
   };
 }
 
@@ -341,6 +343,7 @@ export async function createMeal(
       cook_time_mins: meal.cookTimeMins ?? null,
       instructions: meal.instructions,
       source_starter_meal_id: meal.sourceStarterMealId ?? null,
+      created_via_ai: meal.createdViaAi ?? false,
     })
     .select()
     .single();

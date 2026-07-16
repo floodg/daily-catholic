@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Loader2, Sparkles } from "lucide-react";
 import type { IngredientCatalog } from "./api";
 import {
   getIngredientsCatalog,
@@ -7,10 +8,13 @@ import {
   deleteIngredient,
   saveIngredientProductPreferences,
 } from "./api";
+import { findStoreProducts } from "./findStoreProductsApi";
 import { getStoreProducts } from "../store-products/api";
 import { ProductCombobox } from "../ingredient-products/IngredientProductsPage";
 import type { StoreProduct } from "../../domain/types";
 import ListPage, { type PanelMode } from "../../components/ui/ListPage";
+
+const STORES = ["Coles", "Woolworths", "Aldi", "IGA", "Other"] as const;
 
 const EMPTY_FORM = {
   name: "",
@@ -178,6 +182,15 @@ export default function IngredientsPage() {
               key={`${live?.id ?? "new"}:${mode ?? "none"}`}
               initialItem={live}
               products={products}
+              onProductsFound={(found) => {
+                setProducts((prev) => {
+                  const byId = new Map(prev.map((p) => [p.id, p]));
+                  for (const p of found) byId.set(p.id, p);
+                  return [...byId.values()].sort((a, b) =>
+                    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+                  );
+                });
+              }}
               onSave={async (data) => {
                 await saveIngredient(data, live);
                 onClose();
@@ -210,6 +223,7 @@ export default function IngredientsPage() {
 interface IngredientFormProps {
   initialItem: IngredientCatalog | null;
   products: StoreProduct[];
+  onProductsFound: (products: StoreProduct[]) => void;
   onSave: (data: typeof EMPTY_FORM) => void;
   onCancel: () => void;
   saving?: boolean;
@@ -219,6 +233,7 @@ interface IngredientFormProps {
 function IngredientForm({
   initialItem,
   products,
+  onProductsFound,
   onSave,
   onCancel,
   saving,
@@ -232,6 +247,7 @@ function IngredientForm({
     defaultStoreProductId: initialItem?.defaultStoreProductId ?? null,
     alternativeStoreProductIds: initialItem?.alternativeStoreProducts.map((p) => p.storeProductId) ?? [],
   }));
+  const [showFindProduct, setShowFindProduct] = useState(false);
 
   const selectedProduct = localData.defaultStoreProductId
     ? products.find((p) => p.id === localData.defaultStoreProductId)
@@ -361,18 +377,48 @@ function IngredientForm({
               </button>
             </div>
           ) : (
-            <ProductCombobox
-              placeholder="Search for a default product…"
-              storeProducts={products}
-              excludeIds={localData.alternativeStoreProductIds}
-              onSelect={(p) =>
-                setLocalData({ ...localData, defaultStoreProductId: p.id })
-              }
-            />
+            <div style={{ display: "grid", gap: "0.5rem" }}>
+              <ProductCombobox
+                placeholder="Search for a default product…"
+                storeProducts={products}
+                excludeIds={localData.alternativeStoreProductIds}
+                onSelect={(p) =>
+                  setLocalData({ ...localData, defaultStoreProductId: p.id })
+                }
+              />
+              <button
+                type="button"
+                className="btn-app-secondary"
+                onClick={() => setShowFindProduct(true)}
+                disabled={!localData.name.trim()}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.4rem",
+                  width: "100%",
+                }}
+              >
+                <Sparkles size={14} />
+                Find product
+              </button>
+            </div>
           )}
         </div>
         <p className="form-hint">Link this ingredient to a preferred product for shopping and meal planning.</p>
       </div>
+
+      {showFindProduct && (
+        <FindProductModal
+          ingredientName={localData.name.trim()}
+          onClose={() => setShowFindProduct(false)}
+          onSelect={(product) => {
+            onProductsFound([product]);
+            setLocalData({ ...localData, defaultStoreProductId: product.id });
+            setShowFindProduct(false);
+          }}
+        />
+      )}
 
       <div className="form-group">
         <label className="app-label">Alternative products</label>
@@ -515,6 +561,276 @@ function IngredientView({ item, onEdit, onDelete }: IngredientViewProps) {
           ) : (
             <div style={{ fontFamily: "DM Sans, sans-serif", color: "var(--text-muted)" }}>—</div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface FindProductModalProps {
+  ingredientName: string;
+  onClose: () => void;
+  onSelect: (product: StoreProduct) => void;
+}
+
+function FindProductModal({
+  ingredientName,
+  onClose,
+  onSelect,
+}: FindProductModalProps) {
+  const [store, setStore] = useState<string>(STORES[0]);
+  const [products, setProducts] = useState<StoreProduct[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleSearch = async () => {
+    if (!ingredientName) {
+      setError("Enter an ingredient name first.");
+      return;
+    }
+    setSearching(true);
+    setError(null);
+    setSelectedId(null);
+    setSearched(false);
+    try {
+      const found = await findStoreProducts(ingredientName, store);
+      setProducts(found);
+      setSearched(true);
+      if (found.length === 0) {
+        setError("No products found for this store. Try another store or search manually.");
+      }
+    } catch (err) {
+      console.error(err);
+      setProducts([]);
+      setSearched(true);
+      setError(err instanceof Error ? err.message : "Failed to find products");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const selected = selectedId
+    ? products.find((p) => p.id === selectedId) ?? null
+    : null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="find-product-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxHeight: "min(85vh, 640px)",
+          width: "min(560px, 100%)",
+          maxWidth: "100%",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          boxSizing: "border-box",
+        }}
+      >
+        <h2 id="find-product-title">Find product</h2>
+        <p className="help-text" style={{ marginTop: 0 }}>
+          Search <strong style={{ color: "var(--parchment)" }}>{ingredientName}</strong> at a store,
+          then pick a product to link.
+        </p>
+
+        <div className="form-group" style={{ marginBottom: "0.75rem" }}>
+          <label className="app-label" htmlFor="find-product-store">Store</label>
+          <select
+            id="find-product-store"
+            className="app-input"
+            value={store}
+            onChange={(e) => {
+              setStore(e.target.value);
+              setProducts([]);
+              setSearched(false);
+              setSelectedId(null);
+              setError(null);
+            }}
+            disabled={searching}
+          >
+            {STORES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="button"
+          className="btn-app-primary"
+          onClick={handleSearch}
+          disabled={searching || !ingredientName}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.45rem",
+            width: "100%",
+            marginBottom: "0.75rem",
+          }}
+        >
+          {searching ? (
+            <>
+              <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+              Searching {store}…
+            </>
+          ) : (
+            <>
+              <Sparkles size={16} />
+              Search with AI
+            </>
+          )}
+        </button>
+
+        {error && (
+          <p className="form-error" style={{ margin: "0 0 0.75rem" }}>{error}</p>
+        )}
+
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          overflowX: "hidden",
+          overflowY: "auto",
+          display: "grid",
+          gap: "0.5rem",
+          marginBottom: "0.5rem",
+        }}>
+          {products.map((p) => {
+            const isSelected = selectedId === p.id;
+            const brand = p.brand?.trim() ?? "";
+            const name = p.name.trim();
+            const title = brand && !name.toLowerCase().startsWith(brand.toLowerCase())
+              ? `${brand} ${name}`
+              : name;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setSelectedId(p.id)}
+                disabled={searching}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "0.75rem",
+                  textAlign: "left",
+                  width: "100%",
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
+                  padding: "0.75rem 0.875rem",
+                  borderRadius: 12,
+                  cursor: "pointer",
+                  border: isSelected
+                    ? "1.5px solid var(--gold)"
+                    : "1px solid var(--app-border)",
+                  background: isSelected
+                    ? "rgba(201,168,76,0.08)"
+                    : "rgba(255,255,255,0.03)",
+                  transition: "border-color 0.15s, background 0.15s",
+                }}
+              >
+                {p.imageUrl ? (
+                  <img
+                    src={p.imageUrl}
+                    alt=""
+                    width={40}
+                    height={40}
+                    style={{
+                      width: 40,
+                      height: 40,
+                      objectFit: "contain",
+                      borderRadius: 8,
+                      background: "rgba(255,255,255,0.06)",
+                      flexShrink: 0,
+                      marginTop: 2,
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 8,
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid var(--app-border)",
+                    flexShrink: 0,
+                    marginTop: 2,
+                  }} />
+                )}
+                <div style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>
+                  <div style={{
+                    fontFamily: "DM Sans, sans-serif",
+                    fontWeight: 650,
+                    color: "var(--parchment)",
+                    lineHeight: 1.35,
+                    whiteSpace: "normal",
+                  }}>
+                    {title}
+                  </div>
+                  <div style={{
+                    fontFamily: "DM Sans, monospace",
+                    fontSize: "0.72rem",
+                    color: "var(--text-muted)",
+                    marginTop: "0.2rem",
+                    lineHeight: 1.4,
+                    whiteSpace: "normal",
+                  }}>
+                    {[p.store, p.sizeLabel].filter(Boolean).join(" · ")}
+                    {p.productUrl && (
+                      <>
+                        {" · "}
+                        <a
+                          href={p.productUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ color: "var(--gold)", textDecoration: "none" }}
+                        >
+                          Open
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+
+          {!searching && searched && products.length === 0 && !error && (
+            <p className="form-hint" style={{ margin: 0 }}>No products found.</p>
+          )}
+          {!searching && !searched && (
+            <p className="form-hint" style={{ margin: 0 }}>
+              Choose a store and search to see matching products.
+            </p>
+          )}
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn-app-ghost" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn-app-primary"
+            type="button"
+            disabled={!selected}
+            onClick={() => selected && onSelect(selected)}
+          >
+            Use product
+          </button>
         </div>
       </div>
     </div>

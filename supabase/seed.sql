@@ -200,7 +200,7 @@ values
   ('33333333-0001-0001-0001-000000000026', 'Chicken breast',         false, false, null),
   ('33333333-0001-0001-0001-000000000027', 'Lemon juice',            false, false, null),
   ('33333333-0001-0001-0001-000000000028', 'Garlic',                 false, false, null)
-on conflict (name) do update set
+on conflict (name) where created_by_user_id is null do update set
   optional = excluded.optional,
   pantry_staple = excluded.pantry_staple,
   default_store_product_id = coalesce(public.ingredients.default_store_product_id, excluded.default_store_product_id);
