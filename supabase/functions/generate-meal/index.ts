@@ -346,7 +346,7 @@ const hydrateOne = async (
   ing: DraftIngredient,
   store: string,
   log: LogFn,
-  opts: { skipGemini: boolean },
+  opts: { skipGemini: boolean; userId: string },
 ): Promise<DraftIngredient> => {
   try {
     const candidate = await collectCandidate(supabase, ing.name, store, log, {
@@ -354,9 +354,12 @@ const hydrateOne = async (
       skipClaude: !opts.skipGemini,
       skipGemini: opts.skipGemini,
       preferGemini: !opts.skipGemini,
+      userId: opts.userId,
     });
     if (!candidate) return ing;
-    const persisted = await persistCandidate(supabase, candidate, log);
+    const persisted = await persistCandidate(supabase, candidate, log, {
+      userId: opts.userId,
+    });
     if (!persisted?.id) return ing;
     return {
       ...ing,
@@ -386,7 +389,7 @@ const hydrateProducts = async (
   meal: DraftMeal,
   store: string,
   log: LogFn,
-  opts: { skipGemini: boolean },
+  opts: { skipGemini: boolean; userId: string },
 ): Promise<DraftMeal> => {
   const ingredients = await Promise.all(
     meal.ingredients.map((ing) => hydrateOne(supabase, ing, store, log, opts)),
@@ -451,6 +454,7 @@ Deno.serve(async (req) => {
     const { meal: generated, provider } = await generateMeal(prompt, store, log);
     const meal = await hydrateProducts(serviceClient, generated, store, log, {
       skipGemini: provider === "claude",
+      userId: userData.user.id,
     });
     return jsonResponse({ meal, provider });
   } catch (err) {
