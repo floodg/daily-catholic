@@ -258,7 +258,7 @@ function printMeal(meal: Meal) {
     return `<tr><td>${ing.name}</td><td style="text-align:right;padding-left:1.5rem;white-space:nowrap;">${qty}</td></tr>`;
   }).join("");
 
-  const instructionItems = meal.instructions.map((step, i) =>
+  const instructionItems = meal.instructions.map((step) =>
     `<li>${step}</li>`
   ).join("");
 
