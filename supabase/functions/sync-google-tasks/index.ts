@@ -155,6 +155,9 @@ const normalizeStoreName = (listTitle: string, storeNameMap: Record<string, stri
 /** Matches task titles like "Almond meal from Coles" or "Drill bits from Bunnings". */
 const FROM_STORE_PATTERN = /\s+from\s+(.+)$/i;
 
+/** Multi-product separator phrase in task titles (case-insensitive). */
+const AND_ALSO_PATTERN = /\s+and\s+also\s+/i;
+
 interface ParsedTask {
   productNames: string[];
   store: string;
@@ -163,42 +166,25 @@ interface ParsedTask {
 
 /**
  * Split the product portion of a task into one or more item names.
- * - "lettuce, cordial, Almond meal" → comma-separated (multi-word segments OK)
- * - "lettuce cordial electrolytes" → space-separated when 3+ single-word tokens
- *   and none of the tokens match the store name (avoids splitting product titles)
- * - "Coles Raspberry Cordial" / "Almond meal" → kept as one item
+ * Uses "AND ALSO" as the only multi-product separator (case-insensitive).
+ * Single-product titles are returned as one item, including multi-word names
+ * like "Almond meal" or "Coles Raspberry Cordial".
  */
-const splitProductNames = (productPart: string, store?: string): string[] => {
+const splitProductNames = (productPart: string): string[] => {
   const trimmed = productPart.trim();
   if (!trimmed) return [];
-
-  if (/[,;]/.test(trimmed)) {
-    return trimmed.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
-  }
-
-  const bySpace = trimmed.split(/\s+/).filter(Boolean);
-  if (bySpace.length >= 3) {
-    const storeLower = store?.trim().toLowerCase();
-    const mentionsStore = storeLower
-      ? bySpace.some((word) => word.toLowerCase() === storeLower)
-      : false;
-    if (!mentionsStore) {
-      return bySpace;
-    }
-  }
-
-  return [trimmed];
+  return trimmed.split(AND_ALSO_PATTERN).map((s) => s.trim()).filter(Boolean);
 };
 
 /**
  * Parse a Google Task title into product name(s) + store.
- * When the title contains " from [store]", the store suffix wins over the list name
- * (supports a single generic Tasks list). Known store aliases are normalized via
- * storeNameMap; unknown stores keep the raw text after "from".
+ * When the title contains " from [store]", that store is used. Known store
+ * aliases are normalized via storeNameMap; unknown stores keep the raw text
+ * after "from". Without a store suffix, resolveItemStore defaults to Coles.
  *
- * Multiple items in one task:
- *   "lettuce cordial electrolytes from Coles"  → 3 items
- *   "lettuce, cordial, Almond meal from Coles" → 3 items (comma for multi-word names)
+ * Multiple items in one task (separated by "AND ALSO"):
+ *   "Almond meal AND ALSO lettuce from Coles"  → 2 items
+ *   "Eggs AND ALSO butter AND ALSO cheese"     → 3 items (Coles default)
  */
 const parseTaskTitle = (
   title: string,
@@ -211,7 +197,7 @@ const parseTaskTitle = (
     const productPart = trimmed.slice(0, match.index).trim();
     const rawStore = match[1].trim();
     const normalizedStore = normalizeStoreName(rawStore, storeNameMap);
-    const productNames = splitProductNames(productPart, normalizedStore);
+    const productNames = splitProductNames(productPart);
     if (productNames.length > 0 && rawStore) {
       return {
         productNames,
@@ -221,7 +207,7 @@ const parseTaskTitle = (
     }
   }
   return {
-    productNames: splitProductNames(trimmed, listStore),
+    productNames: splitProductNames(trimmed),
     store: listStore,
     storeFromTitle: false,
   };

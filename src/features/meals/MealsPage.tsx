@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { Clock, Flame, Plus, Trash2 } from "lucide-react";
+import { Clock, Flame, Plus, Printer, Trash2 } from "lucide-react";
 import type { Meal, Ingredient, MealIngredientProduct } from "../../domain/types";
 import { getMealsForUser, createMeal, updateMeal, deleteMeal } from "./api";
 import { upsertIngredientFlags, getIngredientsCatalog, resolvePreferredProductsForIngredientNames } from "../ingredients/api";
@@ -244,6 +244,65 @@ function MealCard({ meal, isSelected, onSelect }: {
   );
 }
 
+/* ── Print Helper ────────────────────────────────────────────────────────────── */
+
+function printMeal(meal: Meal) {
+  const { primary, subtitle } = splitMealDisplayName(meal.name);
+  const prepCook = [
+    meal.prepTimeMins ? `Prep: ${meal.prepTimeMins} min` : null,
+    meal.cookTimeMins ? `Cook: ${meal.cookTimeMins} min` : null,
+  ].filter(Boolean).join("  ·  ");
+
+  const ingredientRows = meal.ingredients.map(ing => {
+    const qty = ing.quantity ?? (ing.quantityNum != null ? `${ing.quantityNum}${ing.unit ? " " + ing.unit : ""}` : "");
+    return `<tr><td>${ing.name}</td><td style="text-align:right;padding-left:1.5rem;white-space:nowrap;">${qty}</td></tr>`;
+  }).join("");
+
+  const instructionItems = meal.instructions.map((step) =>
+    `<li>${step}</li>`
+  ).join("");
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>${primary}</title>
+  <style>
+    body { font-family: Georgia, serif; max-width: 680px; margin: 2rem auto; color: #111; font-size: 14px; line-height: 1.6; }
+    h1 { font-size: 1.6rem; margin: 0 0 0.2rem; }
+    .subtitle { font-size: 0.85rem; color: #555; margin-bottom: 0.25rem; font-style: italic; }
+    .tags { font-size: 0.75rem; color: #666; margin-bottom: 0.5rem; }
+    .time { font-size: 0.85rem; color: #555; margin-bottom: 1.25rem; }
+    h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #ccc; padding-bottom: 0.3rem; margin: 1.25rem 0 0.75rem; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 0.3rem 0; border-bottom: 1px solid #eee; vertical-align: top; }
+    ol { padding-left: 1.25rem; margin: 0; }
+    li { margin-bottom: 0.5rem; }
+    @media print { body { margin: 1rem; } }
+  </style>
+</head>
+<body>
+  <h1>${primary}</h1>
+  ${subtitle ? `<div class="subtitle">${subtitle}</div>` : ""}
+  ${meal.tags?.length ? `<div class="tags">${meal.tags.join("  ·  ")}</div>` : ""}
+  ${prepCook ? `<div class="time">${prepCook}</div>` : ""}
+  ${meal.ingredients.length > 0 ? `
+  <h2>Ingredients (${meal.ingredients.length})</h2>
+  <table>${ingredientRows}</table>` : ""}
+  ${meal.instructions.length > 0 ? `
+  <h2>Instructions</h2>
+  <ol>${instructionItems}</ol>` : ""}
+</body>
+</html>`;
+
+  const win = window.open("", "_blank", "width=750,height=900");
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
 /* ── Meal Detail View ────────────────────────────────────────────────────────── */
 
 function MealDetail({ meal, onEdit, onDelete }: {
@@ -257,10 +316,18 @@ function MealDetail({ meal, onEdit, onDelete }: {
 
   return (
     <div>
-      {/* Edit + Delete actions */}
+      {/* Edit + Delete + Print actions */}
       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}>
         <button className="btn-app-primary" style={{ flex: 1 }} onClick={onEdit}>
           Edit Meal
+        </button>
+        <button
+          className="btn-app-secondary"
+          onClick={() => printMeal(meal)}
+          style={{ padding: "0.5rem 0.75rem" }}
+          title="Print recipe"
+        >
+          <Printer size={15} />
         </button>
         <button
           className="btn-app-secondary"

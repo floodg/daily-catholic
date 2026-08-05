@@ -1,15 +1,30 @@
 ## sync-google-tasks
 
 Scheduled Edge Function that:
-- Polls every Google Tasks list (list name becomes the `store`, e.g. `Coles`, `Woolworths`, `Aldi`, `Bunnings`)
+- Polls every Google Tasks list (list name is not used as the store — see **Task title format** below)
 - For each task, checks `store_products` first for an existing match per store; only calls Claude for stores where no match is found
 - Persists any newly enriched products into `store_products` (global catalogue rows)
 - Resolves or creates an `ingredients` row from the task title
 - Sets `ingredients.default_store_product_id` using Coles-brand-first, then cheapest-available rule
 - Replaces `ingredient_store_product_options` with the non-default alternatives
 - Inserts the default product details into `shopping_list_items` (enrichment archive)
-- Finds or creates the latest **open** `shopping_trips` row for the list's store (scoped to `SYNC_USER_ID`, `completed_at IS NULL`) and inserts each task as a `shopping_trip_items` row linked to that trip, with `product_name`, `ingredient_name` (the raw task title), `store_product_id`, and parsed `pack_quantity` / `pack_unit`
+- Finds or creates the latest **open** `shopping_trips` row for the resolved store (scoped to `SYNC_USER_ID`, `completed_at IS NULL`) and inserts each task as a `shopping_trip_items` row linked to that trip, with `product_name`, `ingredient_name` (the raw task title), `store_product_id`, and parsed `pack_quantity` / `pack_unit`
 - Deletes the task from Google Tasks
+
+### Task title format
+
+Use **AND ALSO** to separate multiple products in one task (case-insensitive):
+
+```
+Almond meal AND ALSO lettuce
+Milk AND ALSO Bread from Woolworths
+Eggs AND ALSO butter AND ALSO cheese from Aldi
+```
+
+- **Multi-product:** `"Product A AND ALSO Product B [from Store]"`
+- **Store suffix (optional):** append ` from Coles`, ` from Woolworths`, ` from Woolies`, ` from Aldi`, etc.
+- **Default store:** Coles when no ` from [store]` suffix is present (override via `DEFAULT_SYNC_STORE` secret)
+- **Single product:** plain titles like `Almond meal` or `Coles Raspberry Cordial` sync as one item
 
 ### Open-trip accumulation and auto-completion
 
