@@ -40,6 +40,11 @@ interface DbIngredientNutrition {
   fibre_g_per_100: number
 }
 
+interface DbMealIngredientNutritionSource {
+  name: string
+  store_product_id: string | null
+}
+
 function mapTargets(row: DbMacroTargets): MacroTargets {
   return {
     caloriesKcal: row.calories_kcal,
@@ -62,6 +67,73 @@ function mapNutrition(row: DbIngredientNutrition): IngredientNutritionProfile {
     totalCarbsGPer100: row.total_carbs_g_per_100,
     fibreGPer100: row.fibre_g_per_100,
   }
+}
+
+async function fetchIngredientNutritionProfiles(): Promise<IngredientNutritionProfile[]> {
+  const { data, error } = await supabase
+    .from('user_ingredient_nutrition')
+    .select('*')
+    .order('ingredient_name', { ascending: true })
+
+  if (error) throw error
+  return (data as DbIngredientNutrition[]).map(mapNutrition)
+}
+
+async function hydrateMissingLinkedIngredientNutrition(
+  profiles: IngredientNutritionProfile[],
+): Promise<boolean> {
+  const configured = new Set(
+    profiles.map(profile => profile.ingredientName.trim().toLowerCase()),
+  )
+
+  const { data, error } = await supabase
+    .from('meal_ingredients')
+    .select('name, store_product_id')
+    .not('store_product_id', 'is', null)
+
+  if (error) {
+    console.warn('Unable to discover ingredients for automatic nutrition hydration', error)
+    return false
+  }
+
+  const missingByName = new Map<string, { ingredientName: string; productId: string }>()
+
+  for (const row of (data ?? []) as DbMealIngredientNutritionSource[]) {
+    const ingredientName = row.name?.trim()
+    const productId = row.store_product_id?.trim()
+    if (!ingredientName || !productId) continue
+
+    const key = ingredientName.toLowerCase()
+    if (configured.has(key) || missingByName.has(key)) continue
+    missingByName.set(key, { ingredientName, productId })
+  }
+
+  if (missingByName.size === 0) return false
+
+  const results = await Promise.allSettled(
+    [...missingByName.values()].map(async ({ ingredientName, productId }) => {
+      const { data: responseData, error: invokeError } = await supabase.functions.invoke(
+        'hydrate-product-nutrition',
+        { body: { ingredientName, productId } },
+      )
+
+      if (invokeError) throw invokeError
+      return responseData?.hydrated === true
+    }),
+  )
+
+  let shouldRefresh = false
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      // `hydrated: false` can also mean another request created the profile
+      // while this page was loading, so refresh after every successful call.
+      shouldRefresh = true
+    } else {
+      console.warn('Automatic ingredient nutrition hydration failed', result.reason)
+    }
+  }
+
+  return shouldRefresh
 }
 
 export async function getMacroTargets(): Promise<MacroTargets | null> {
@@ -97,13 +169,9 @@ export async function saveMacroTargets(
 }
 
 export async function getIngredientNutritionProfiles(): Promise<IngredientNutritionProfile[]> {
-  const { data, error } = await supabase
-    .from('user_ingredient_nutrition')
-    .select('*')
-    .order('ingredient_name', { ascending: true })
-
-  if (error) throw error
-  return (data as DbIngredientNutrition[]).map(mapNutrition)
+  const profiles = await fetchIngredientNutritionProfiles()
+  const shouldRefresh = await hydrateMissingLinkedIngredientNutrition(profiles)
+  return shouldRefresh ? fetchIngredientNutritionProfiles() : profiles
 }
 
 export async function saveIngredientNutritionProfile(
