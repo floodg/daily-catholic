@@ -33,7 +33,6 @@ declare
   v_qty numeric;
   v_unit text;
 begin
-  -- Prefer structured store-product size.
   if p_size_value is not null and p_size_value > 0 and p_size_unit is not null then
     v_qty := p_size_value;
     v_unit := lower(trim(p_size_unit));
@@ -42,12 +41,12 @@ begin
     v_unit := lower(trim(p_pack_unit));
   else
     -- Fallback for raw task text such as "2kg beef mince".
-    v_match := regexp_match(lower(coalesce(p_product_name, '')), '(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\b');
+    v_match := regexp_match(lower(coalesce(p_product_name, '')), '(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\M');
     if v_match is not null then
       v_qty := v_match[1]::numeric;
       v_unit := v_match[2];
     else
-      v_match := regexp_match(lower(coalesce(p_product_name, '')), '(\d+(?:\.\d+)?)\s*(pack|pk|pkt|ct|count|each|ea|units?)\b');
+      v_match := regexp_match(lower(coalesce(p_product_name, '')), '(\d+(?:\.\d+)?)\s*(pack|pk|pkt|ct|count|each|ea|units?)\M');
       if v_match is not null then
         v_qty := v_match[1]::numeric;
         v_unit := 'units';
@@ -80,6 +79,40 @@ begin
 end;
 $$;
 
+-- Resolve task/product wording against the master catalogue.  Start with the
+-- canonical resolver, then allow a seeded alias to occur inside a longer store
+-- product title (e.g. "Ocean Royale Atlantic Salmon Portions 1kg" contains the
+-- alias "salmon portions").  Longest/highest-confidence alias wins.
+create or replace function public.resolve_trip_item_ingredient_id(p_text text)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_norm text := public.normalize_ingredient_lookup_text(p_text);
+begin
+  v_id := public.resolve_canonical_ingredient_id(p_text);
+  if v_id is not null then
+    return v_id;
+  end if;
+
+  select ia.ingredient_id
+    into v_id
+  from public.ingredient_aliases ia
+  join public.ingredients i on i.id = ia.ingredient_id
+  where i.created_by_user_id is null
+    and length(ia.normalized_alias) >= 4
+    and v_norm like '%' || ia.normalized_alias || '%'
+  order by ia.confidence desc, length(ia.normalized_alias) desc, ia.created_at asc
+  limit 1;
+
+  return v_id;
+end;
+$$;
+
 create or replace function public.ensure_trip_item_user_product()
 returns trigger
 language plpgsql
@@ -93,6 +126,7 @@ declare
   v_existing_id uuid;
   v_ingredient_id uuid;
   v_size record;
+  v_canonical_name text;
 begin
   select st.user_id, st.store
     into v_user_id, v_store
@@ -105,11 +139,11 @@ begin
 
   -- Resolve the canonical food concept first. Unmatched products remain valid
   -- store products with ingredient_id NULL.
-  v_ingredient_id := public.resolve_canonical_ingredient_id(
+  v_ingredient_id := public.resolve_trip_item_ingredient_id(
     coalesce(nullif(trim(new.ingredient_name), ''), nullif(trim(new.product_name), ''))
   );
   if v_ingredient_id is null then
-    v_ingredient_id := public.resolve_canonical_ingredient_id(new.product_name);
+    v_ingredient_id := public.resolve_trip_item_ingredient_id(new.product_name);
   end if;
 
   if new.store_product_id is not null then
@@ -118,6 +152,13 @@ begin
     where sp.id = new.store_product_id;
 
     if found then
+      if v_ingredient_id is null then
+        v_ingredient_id := coalesce(
+          v_product.ingredient_id,
+          public.resolve_trip_item_ingredient_id(concat_ws(' ', v_product.brand, v_product.name, v_product.size_label))
+        );
+      end if;
+
       -- Seed products (fixed 11111111 ids) intentionally remain shared. Dynamic
       -- products should live in the user's catalogue, so clone a shared dynamic
       -- row before linking the trip item.
@@ -220,11 +261,11 @@ begin
     new.store_product_id := v_existing_id;
   end if;
 
-  -- Store the canonical ingredient name on the trip row when one exists.
   if v_ingredient_id is not null then
-    select i.name into new.ingredient_name
+    select i.name into v_canonical_name
     from public.ingredients i
     where i.id = v_ingredient_id;
+    new.ingredient_name := coalesce(v_canonical_name, new.ingredient_name);
   end if;
 
   return new;
@@ -285,9 +326,6 @@ begin
     'Shopping item'
   );
 
-  -- Keep one active Shopping row per trip item. If the row already exists and is
-  -- still pending, refresh its canonical name/quantity; checked rows are left as
-  -- immutable purchase history.
   update public.shopping_list sl
   set ingredient_name = v_display_name,
       unit = coalesce(v_base.unit, 'units'),
