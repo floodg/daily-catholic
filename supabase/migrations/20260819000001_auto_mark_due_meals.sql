@@ -8,6 +8,10 @@ begin;
 --
 -- Meals explicitly marked "skipped" are never selected, so their ingredients
 -- are not consumed.
+--
+-- A planned meal is not auto-completed until two hours after its scheduled
+-- meal time. This gives the user a grace period for a late meal or to press
+-- Skip before pantry ingredients are consumed.
 
 create extension if not exists pg_cron;
 
@@ -27,8 +31,9 @@ as $$
 declare
   v_meal record;
   v_local_now timestamp;
-  v_due_time time;
+  v_meal_time time;
   v_scheduled_at timestamptz;
+  v_auto_complete_at timestamptz;
   v_result jsonb;
   v_processed integer := 0;
   v_not_due integer := 0;
@@ -59,9 +64,9 @@ begin
     -- (or HH:MM:SS) value. Otherwise use the same slot defaults already used
     -- by mark_meal_eaten.
     if coalesce(v_meal.planned_time, '') ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$' then
-      v_due_time := v_meal.planned_time::time;
+      v_meal_time := v_meal.planned_time::time;
     else
-      v_due_time := case v_meal.meal_slot
+      v_meal_time := case v_meal.meal_slot
         when 'breakfast' then time '08:00'
         when 'lunch'     then time '12:30'
         when 'snack'     then time '15:30'
@@ -70,18 +75,20 @@ begin
       end;
     end if;
 
-    if v_local_now::time < v_due_time then
+    v_scheduled_at := (v_meal.planned_date + v_meal_time) at time zone v_meal.timezone;
+    v_auto_complete_at := v_scheduled_at + interval '2 hours';
+
+    if p_now < v_auto_complete_at then
       v_not_due := v_not_due + 1;
       continue;
     end if;
 
-    -- Persist the intended local meal-slot instant so mark_meal_eaten performs
-    -- its time-aware stock calculation against the correct point in time.
-    v_scheduled_at := (v_meal.planned_date + v_due_time) at time zone v_meal.timezone;
-
     begin
+      -- Use the end of the grace period as the effective eaten time. This
+      -- allows inventory acquired during the two-hour grace window to count
+      -- as available if the meal was actually eaten later than its slot time.
       update public.planned_meals
-      set eaten_at = coalesce(eaten_at, v_scheduled_at)
+      set eaten_at = coalesce(eaten_at, v_auto_complete_at)
       where id = v_meal.id
         and coalesce(status, 'planned') = 'planned';
 
