@@ -416,13 +416,20 @@ function MealDetail({ meal, onEdit, onDelete }: {
                   cursor: hasProducts ? "pointer" : "default",
                   maxWidth: "100%",
                 }}
-                title={hasProducts ? "Click to view product options" : undefined}
+                title={hasProducts ? "Click the cart to view product options" : undefined}
               >
                 <span style={{
                   color: "var(--parchment)", fontWeight: 500, flex: 1, minWidth: 0,
                   overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.35,
                 }}>
-                  {ing.name}
+                  <Link
+                    to={`/app/pantry?ingredient=${encodeURIComponent(ing.name)}`}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ color: "var(--gold)", textDecoration: "underline", textUnderlineOffset: "2px" }}
+                    title={`Open ${ing.name} in Pantry`}
+                  >
+                    {ing.name}
+                  </Link>
                   {ing.pantryStaple && (
                     <span style={{ marginLeft: "0.5rem", fontSize: "0.65rem", color: "#8ab4a0", background: "rgba(138,180,160,0.12)", border: "1px solid rgba(138,180,160,0.25)", padding: "0.05rem 0.3rem", borderRadius: "0.25rem" }}>
                       Staple
