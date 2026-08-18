@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This script is used by GitHub Actions to deploy all Supabase Edge Functions.
 if [[ -z "${SUPABASE_PROJECT_REF:-}" ]]; then
   echo "SUPABASE_PROJECT_REF is required" >&2
   exit 1
