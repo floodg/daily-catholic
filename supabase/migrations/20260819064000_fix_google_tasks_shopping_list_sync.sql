@@ -55,7 +55,25 @@ for each row
 execute function public.sync_google_task_item_to_shopping_list();
 
 -- Repair previously synced Google Task items that were enriched successfully
--- but never surfaced in the current Shopping page.
+-- but never surfaced in the current Shopping page. DISTINCT ON prevents older
+-- duplicate legacy rows from colliding with the shopping_list partial unique
+-- index during one bulk insert.
+with legacy_google_tasks as (
+  select distinct on (
+    sli.user_id,
+    lower(coalesce(nullif(btrim(sli.name), ''), nullif(btrim(sli.raw_name), '')))
+  )
+    sli.user_id,
+    coalesce(nullif(btrim(sli.name), ''), nullif(btrim(sli.raw_name), '')) as ingredient_name
+  from public.shopping_list_items sli
+  where sli.source = 'google_tasks'
+    and sli.user_id is not null
+    and coalesce(nullif(btrim(sli.name), ''), nullif(btrim(sli.raw_name), '')) is not null
+  order by
+    sli.user_id,
+    lower(coalesce(nullif(btrim(sli.name), ''), nullif(btrim(sli.raw_name), ''))),
+    sli.created_at desc nulls last
+)
 insert into public.shopping_list (
   user_id,
   ingredient_name,
@@ -63,22 +81,17 @@ insert into public.shopping_list (
   source
 )
 select
-  sli.user_id,
-  coalesce(nullif(btrim(sli.name), ''), nullif(btrim(sli.raw_name), '')),
+  legacy.user_id,
+  legacy.ingredient_name,
   false,
   'google_tasks'
-from public.shopping_list_items sli
-where sli.source = 'google_tasks'
-  and sli.user_id is not null
-  and coalesce(nullif(btrim(sli.name), ''), nullif(btrim(sli.raw_name), '')) is not null
-  and not exists (
-    select 1
-    from public.shopping_list sl
-    where sl.user_id = sli.user_id
-      and lower(sl.ingredient_name) = lower(
-        coalesce(nullif(btrim(sli.name), ''), nullif(btrim(sli.raw_name), ''))
-      )
-      and sl.is_checked = false
-  );
+from legacy_google_tasks legacy
+where not exists (
+  select 1
+  from public.shopping_list sl
+  where sl.user_id = legacy.user_id
+    and lower(sl.ingredient_name) = lower(legacy.ingredient_name)
+    and sl.is_checked = false
+);
 
 commit;
