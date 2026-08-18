@@ -127,9 +127,9 @@ grant execute on function public.auto_mark_due_meals(timestamptz) to service_rol
 -- rows whose status is still "planned" and mark_meal_eaten guards completion.
 do $$
 begin
-  if exists (select 1 from cron.job where jobname = 'auto-mark-due-meals') then
-    perform cron.unschedule('auto-mark-due-meals');
-  end if;
+  perform cron.unschedule(jobid)
+  from cron.job
+  where jobname = 'auto-mark-due-meals';
 
   perform cron.schedule(
     'auto-mark-due-meals',
