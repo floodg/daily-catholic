@@ -19,7 +19,16 @@ const MATCH_STOP_WORDS = new Set([
   "australian", "australia", "fresh", "organic", "natural",
   "free", "range", "premium", "classic", "original", "value",
   "pack", "pk", "packet", "each", "ea", "large", "medium", "small",
+  "fillet", "fillets", "portion", "portions",
 ]);
+
+const singularizeToken = (token: string): string => {
+  if (token.length <= 3) return token;
+  if (token.endsWith("ies") && token.length > 4) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("oes") && token.length > 4) return token.slice(0, -2);
+  if (token.endsWith("s") && !token.endsWith("ss")) return token.slice(0, -1);
+  return token;
+};
 
 const normalizeForMatch = (value: string): string[] => value
   .toLowerCase()
@@ -27,6 +36,7 @@ const normalizeForMatch = (value: string): string[] => value
   .replace(/[^a-z0-9]+/g, " ")
   .trim()
   .split(/\s+/)
+  .map(singularizeToken)
   .filter((token) => token.length > 1 && !MATCH_STOP_WORDS.has(token));
 
 const scoreIngredientMatch = (
@@ -194,6 +204,15 @@ async function matchProductToMealIngredient(
     return null;
   }
 
+  // If the meal row did not already have a curated product, attach this matched
+  // product without overwriting an existing explicit selection.
+  await supabase
+    .from("meal_ingredients")
+    .update({ store_product_id: productId })
+    .in("meal_id", mealIds)
+    .ilike("name", best.name)
+    .is("store_product_id", null);
+
   log("[hydrate-link] linked product to meal ingredient", "info", {
     product_id: productId,
     product_name: productName,
@@ -203,6 +222,87 @@ async function matchProductToMealIngredient(
   });
 
   return { id: catalog.id, name: catalog.name, score: best.score };
+}
+
+async function propagateIngredientMatch(
+  supabase: AnySupabaseClient,
+  userId: string,
+  productId: string,
+  ingredient: MatchedIngredient,
+  log: LogFn,
+): Promise<void> {
+  const { data: tripRows, error: tripError } = await supabase
+    .from("shopping_trips")
+    .select("id")
+    .eq("user_id", userId);
+  if (tripError) {
+    log("[hydrate-link] failed to load shopping trips for propagation", "warn", { error: tripError });
+    return;
+  }
+
+  const tripIds = ((tripRows ?? []) as { id: string }[]).map((row) => row.id);
+  if (tripIds.length === 0) return;
+
+  const { data: tripItems, error: tripItemError } = await supabase
+    .from("shopping_trip_items")
+    .select("id")
+    .in("shopping_trip_id", tripIds)
+    .eq("store_product_id", productId);
+  if (tripItemError) {
+    log("[hydrate-link] failed to find shopping items for propagation", "warn", { error: tripItemError });
+    return;
+  }
+
+  const tripItemIds = ((tripItems ?? []) as { id: string }[]).map((row) => row.id);
+  if (tripItemIds.length === 0) return;
+
+  await supabase
+    .from("shopping_trip_items")
+    .update({ ingredient_name: ingredient.name })
+    .in("id", tripItemIds);
+
+  const { data: listRows, error: listError } = await supabase
+    .from("shopping_list")
+    .select("id")
+    .eq("user_id", userId)
+    .in("shopping_trip_item_id", tripItemIds);
+  if (listError) {
+    log("[hydrate-link] failed to find shopping-list rows for propagation", "warn", { error: listError });
+    return;
+  }
+
+  const listIds = ((listRows ?? []) as { id: string }[]).map((row) => row.id);
+  if (listIds.length > 0) {
+    await supabase
+      .from("shopping_list")
+      .update({ ingredient_name: ingredient.name })
+      .eq("user_id", userId)
+      .in("id", listIds);
+  }
+
+  await supabase
+    .from("inventory_transactions")
+    .update({ ingredient_id: ingredient.id, ingredient_name: ingredient.name })
+    .eq("user_id", userId)
+    .eq("source_type", "shopping_trip_item")
+    .in("source_id", tripItemIds);
+
+  if (listIds.length > 0) {
+    await supabase
+      .from("inventory_transactions")
+      .update({ ingredient_id: ingredient.id, ingredient_name: ingredient.name })
+      .eq("user_id", userId)
+      .eq("source_type", "shopping_list_item")
+      .in("source_id", listIds);
+  }
+
+  log("[hydrate-link] propagated canonical ingredient through Pantry purchase rows", "info", {
+    product_id: productId,
+    ingredient_id: ingredient.id,
+    ingredient_name: ingredient.name,
+    shopping_trip_items: tripItemIds.length,
+    shopping_list_items: listIds.length,
+  });
 }
 
 Deno.serve(async (req) => {
@@ -267,6 +367,16 @@ Deno.serve(async (req) => {
     ownerId,
     log,
   );
+
+  if (matchedIngredient) {
+    await propagateIngredientMatch(
+      serviceClient,
+      userData.user.id,
+      productId,
+      matchedIngredient,
+      log,
+    );
+  }
 
   const hydrationIngredientName = matchedIngredient?.name ?? ingredientName;
   const hydrated = await ensureIngredientNutrition(
