@@ -34,6 +34,39 @@ function unitToColumns(input: LinkedProductInput): {
   };
 }
 
+async function hydrateNutritionForLinkedProduct(
+  ingredientName: string,
+  productId: string,
+): Promise<void> {
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) return;
+
+    const baseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    if (!baseUrl || !anonKey) return;
+
+    const response = await fetch(`${baseUrl}/functions/v1/hydrate-product-nutrition`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: anonKey,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ ingredientName, productId }),
+    });
+
+    if (!response.ok) {
+      console.warn(`Nutrition hydration failed (${response.status}) for ${ingredientName}`);
+    }
+  } catch (error) {
+    // Product linking is the primary action. Nutrition enrichment is
+    // best-effort and can be retried the next time the product is hydrated.
+    console.warn('Nutrition hydration failed', error);
+  }
+}
+
 export async function getLinkedProductsForIngredients(
   ingredientNames: string[]
 ): Promise<Map<string, LinkedProduct>> {
@@ -146,6 +179,11 @@ export async function upsertLinkedProductForIngredient(
   if (error) throw error;
 
   const row = data as any;
+
+  // Populate the macros profile as part of product hydration. This deliberately
+  // runs after the product is saved and never makes linking fail if AI is down.
+  await hydrateNutritionForLinkedProduct(trimmedName, row.id);
+
   return {
     id: row.id,
     ingredientId: row.ingredient_id,
@@ -178,4 +216,3 @@ export async function unlinkProductForIngredient(ingredientName: string): Promis
     .eq('user_id', user.id)
     .eq('ingredient_id', (data as { id: string }).id);
 }
-

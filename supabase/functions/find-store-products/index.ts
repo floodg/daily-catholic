@@ -4,6 +4,7 @@ import {
   collectCandidates,
   type LogFn,
 } from "../_shared/product-enrichment.ts";
+import { ensureIngredientNutrition } from "../_shared/nutrition-enrichment.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -101,6 +102,17 @@ Deno.serve(async (req) => {
       { preferGemini: false, limit: 6, userId: userData.user.id },
     );
 
+    // The first candidate is the highest-ranked product match. Use it to fill
+    // the ingredient's macro profile if the user has not already supplied one.
+    // Nutrition enrichment is best-effort and must never block product search.
+    const nutritionHydrated = await ensureIngredientNutrition(
+      serviceClient,
+      userData.user.id,
+      ingredientName,
+      candidates[0] ?? null,
+      log,
+    );
+
     const products = candidates.map((c) => ({
       id: c.id,
       name: c.name,
@@ -111,7 +123,7 @@ Deno.serve(async (req) => {
       imageUrl: c.image_url ?? undefined,
     }));
 
-    return jsonResponse({ products });
+    return jsonResponse({ products, nutritionHydrated });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log(`[find-store-products] failed: ${message}`, "error");
