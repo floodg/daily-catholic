@@ -22,6 +22,7 @@ const IngredientsPage = lazy(() => import('./features/ingredients/IngredientsPag
 const Login = lazy(() => import('./pages/Login'))
 const Signup = lazy(() => import('./pages/Signup'))
 const MagicLinkLogin = lazy(() => import('./pages/MagicLinkLogin'))
+const AuthCallback = lazy(() => import('./pages/AuthCallback'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const LandingPage = lazy(() => import('./components/LandingPage'))
 const FiatModePage = lazy(() => import('./features/fiat/FiatModePage'))
@@ -93,6 +94,7 @@ function AppRoutes() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/magic-link" element={<MagicLinkLogin />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/app" element={<ProtectedRoute />}>
           <Route path="onboarding" element={<StarterMealsPage />} />
           <Route element={<Layout />}>
