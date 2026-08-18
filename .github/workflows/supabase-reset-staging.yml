@@ -1,0 +1,41 @@
+name: Reset Supabase Staging DB
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type RESET to confirm destructive staging database reset'
+        required: true
+        type: string
+
+concurrency:
+  group: supabase-staging-reset
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    if: ${{ github.event.inputs.confirm == 'RESET' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link staging project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Reset linked staging database
+        run: supabase db reset --linked
+
+      - name: Verify migration state
+        run: supabase migration list --linked
