@@ -35,7 +35,7 @@ jobs:
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
 
       - name: Reset linked staging database
-        run: supabase db reset --linked
+        run: supabase db reset --linked --yes
 
       - name: Verify migration state
         run: supabase migration list --linked
