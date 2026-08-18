@@ -4,6 +4,7 @@ import { Clock, Flame, Plus, Printer, Trash2 } from "lucide-react";
 import type { Meal, Ingredient, MealIngredientProduct } from "../../domain/types";
 import { getMealsForUser, createMeal, updateMeal, deleteMeal } from "./api";
 import { upsertIngredientFlags, getIngredientsCatalog, resolvePreferredProductsForIngredientNames } from "../ingredients/api";
+import { getPantryItems } from "../pantry/api";
 import { useAuth } from "../../context/AuthProvider";
 import { v4 as uuidv4 } from "../../storage/uuid";
 import ListPage from "../../components/ui/ListPage";
@@ -12,6 +13,7 @@ export default function MealsPage() {
   const { user } = useAuth();
   const [meals, setMeals] = useState<Meal[]>([]);
   const [pantryIngredientNames, setPantryIngredientNames] = useState<string[]>([]);
+  const [pantryStockNames, setPantryStockNames] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -20,7 +22,11 @@ export default function MealsPage() {
     setLoading(true);
     (async () => {
       try {
-        const [raw, list] = await Promise.all([getMealsForUser(), getIngredientsCatalog()]);
+        const [raw, list, pantryItems] = await Promise.all([
+          getMealsForUser(),
+          getIngredientsCatalog(),
+          getPantryItems(),
+        ]);
         if (cancelled) return;
         const sorted = [...raw].sort((a, b) =>
           a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
@@ -29,6 +35,9 @@ export default function MealsPage() {
         setPantryIngredientNames(
           list.filter((i) => i.kind === 'food').map((i) => i.name)
         );
+        setPantryStockNames(new Set(
+          pantryItems.map((item) => item.ingredientName.trim().toLocaleLowerCase())
+        ));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -107,6 +116,7 @@ export default function MealsPage() {
             return (
               <MealDetail
                 meal={live}
+                pantryStockNames={pantryStockNames}
                 onEdit={() => setMode("edit")}
                 onDelete={() => handleDelete(live.id, onClose)}
               />
@@ -305,8 +315,9 @@ function printMeal(meal: Meal) {
 
 /* ── Meal Detail View ────────────────────────────────────────────────────────── */
 
-function MealDetail({ meal, onEdit, onDelete }: {
+function MealDetail({ meal, pantryStockNames, onEdit, onDelete }: {
   meal: Meal;
+  pantryStockNames: Set<string>;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -404,6 +415,7 @@ function MealDetail({ meal, onEdit, onDelete }: {
           </h4>
           {meal.ingredients.map(ing => {
             const hasProducts = ing.primaryProduct != null || (ing.productOptions?.length ?? 0) > 0;
+            const isInPantry = pantryStockNames.has(ing.name.trim().toLocaleLowerCase());
             const qtyLabel = ing.quantity ?? (ing.quantityNum != null ? `${ing.quantityNum}${ing.unit ? " " + ing.unit : ""}` : null);
             return (
               <div
@@ -422,14 +434,18 @@ function MealDetail({ meal, onEdit, onDelete }: {
                   color: "var(--parchment)", fontWeight: 500, flex: 1, minWidth: 0,
                   overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.35,
                 }}>
-                  <Link
-                    to={`/app/pantry?ingredient=${encodeURIComponent(ing.name)}`}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ color: "var(--gold)", textDecoration: "underline", textUnderlineOffset: "2px" }}
-                    title={`Open ${ing.name} in Pantry`}
-                  >
-                    {ing.name}
-                  </Link>
+                  {isInPantry ? (
+                    <Link
+                      to={`/app/pantry?ingredient=${encodeURIComponent(ing.name)}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ color: "var(--gold)", textDecoration: "underline", textUnderlineOffset: "2px" }}
+                      title={`Open ${ing.name} in Pantry`}
+                    >
+                      {ing.name}
+                    </Link>
+                  ) : (
+                    ing.name
+                  )}
                   {ing.pantryStaple && (
                     <span style={{ marginLeft: "0.5rem", fontSize: "0.65rem", color: "#8ab4a0", background: "rgba(138,180,160,0.12)", border: "1px solid rgba(138,180,160,0.25)", padding: "0.05rem 0.3rem", borderRadius: "0.25rem" }}>
                       Staple
