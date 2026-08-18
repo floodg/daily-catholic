@@ -1,1 +1,0 @@
-Verification notes: initial Shopping List rendering no longer performs ingredient/product preference enrichment before displaying trip items. Core trip, purchased and pending data are requested concurrently; product alternatives are fetched on demand when Swap Product is opened.
