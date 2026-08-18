@@ -159,16 +159,19 @@ on conflict (normalized_alias) do update set
   source = excluded.source,
   confidence = greatest(public.ingredient_aliases.confidence, excluded.confidence);
 
--- Backfill recipe ingredient ids and canonical display names.
+-- Backfill recipe ingredient ids first, then canonical display names.
+-- PostgreSQL does not allow the UPDATE target alias to be referenced from the
+-- LATERAL subquery used by the previous version of this migration.
 update public.meal_ingredients mi
-set ingredient_id = r.ingredient_id,
-    name = i.name
-from lateral (
-  select public.resolve_canonical_ingredient_id(mi.name) as ingredient_id
-) r
-join public.ingredients i on i.id = r.ingredient_id
-where r.ingredient_id is not null
-  and (mi.ingredient_id is distinct from r.ingredient_id or mi.name is distinct from i.name);
+set ingredient_id = public.resolve_canonical_ingredient_id(mi.name)
+where public.resolve_canonical_ingredient_id(mi.name) is not null
+  and mi.ingredient_id is distinct from public.resolve_canonical_ingredient_id(mi.name);
+
+update public.meal_ingredients mi
+set name = i.name
+from public.ingredients i
+where mi.ingredient_id = i.id
+  and mi.name is distinct from i.name;
 
 -- Keep future recipe rows canonical automatically.
 create or replace function public.canonicalize_meal_ingredient()
