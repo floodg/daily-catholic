@@ -11,7 +11,7 @@ const WorkoutsPage = lazy(() => import('./features/workouts/WorkoutsPage'))
 const ShoppingPage = lazy(() => import('./features/shopping/ShoppingPageFast'))
 const ShoppingTripsPage = lazy(() => import('./features/shopping-trips/ShoppingTripsPage'))
 const InventoryPage = lazy(() => import('./features/inventory/InventoryPage'))
-const PantryPage = lazy(() => import('./features/pantry/PantryPage'))
+const PantryRoute = lazy(() => import('./features/pantry/PantryRoute'))
 const StarterMealsPage = lazy(() => import('./features/onboarding/StarterMealsPage'))
 const AccountSettingsPage = lazy(() => import('./features/settings/AccountSettingsPage'))
 const AccountDetailsPage = lazy(() => import('./features/settings/AccountDetailsPage'))
@@ -112,7 +112,7 @@ function AppRoutes() {
             <Route path="shopping" element={<ShoppingPage />} />
             <Route path="shopping-trips" element={<ShoppingTripsPage />} />
             <Route path="inventory" element={<InventoryPage />} />
-            <Route path="pantry" element={<PantryPage />} />
+            <Route path="pantry" element={<PantryRoute />} />
             <Route path="macros" element={<MacrosPage />} />
             <Route path="settings" element={<AccountSettingsPage />} />
             <Route path="account" element={<AccountDetailsPage />} />
