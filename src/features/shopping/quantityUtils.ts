@@ -21,7 +21,6 @@ export function normalizeUnit(raw: string): ParsedQuantity['unit'] {
   if (u === "milliliter" || u === "milliliters" || u === "millilitre" || u === "millilitres" || u === "ml") return "ml";
   if (u === "liter" || u === "liters" || u === "litre" || u === "litres" || u === "l") return "l";
   if (u === "unit" || u === "units" || u === "piece" || u === "pieces" || u === "pcs") return "units";
-  if (u === "serving" || u === "servings" || u === "portion" || u === "portions") return "serving";
   if (u === "cup" || u === "cups") return "cup";
   if (u === "tablespoon" || u === "tablespoons" || u === "tbsp") return "tbsp";
   if (u === "teaspoon" || u === "teaspoons" || u === "tsp") return "tsp";
@@ -33,9 +32,6 @@ export function normalizeUnit(raw: string): ParsedQuantity['unit'] {
  * - 1 tsp  ≈ 5 g
  * - 1 tbsp ≈ 15 g
  * - 1 cup  ≈ 240 ml
- *
- * A serving is intentionally NOT converted here: its physical size is
- * ingredient/product-specific and is resolved by the nutrition/portion profile.
  */
 export function toBaseUnit(amount: number, unit: string): ParsedQuantity {
   const n = normalizeUnit(unit);
@@ -56,7 +52,6 @@ export function toBaseUnit(amount: number, unit: string): ParsedQuantity {
  * - Bare numbers: "0.5" → {amount: 0.5, unit: "units"}
  * - Ranges with hyphen or en-dash: "4-6" or "4–6" → lower bound {amount: 4, unit: "units"}
  * - Number + unit: "500g", "1.5 kg", "2 cups", "1 tbsp", "0.5 tsp"
- * - Recipe portions: "1 serving", "2 portions" → unit "serving"
  */
 export function parseQuantity(q: string | undefined): ParsedQuantity | null {
   if (!q) return null;
@@ -86,13 +81,10 @@ export function parseQuantity(q: string | undefined): ParsedQuantity | null {
  * shopping-list items.
  *
  * Matches: "to taste", "optional", "as desired", "as needed", "pinch",
- * "to serve", "small", "large", "medium".
- *
- * Numeric servings/portions are measured quantities and are handled by
- * parseQuantity so they can participate in Pantry deduction.
+ * "to serve", "small", "large", "medium", "1 serving", "2 servings", etc.
  */
 const UNMEASURED_RE =
-  /^(to taste|optional|as desired|as needed|pinch|to serve|small|large|medium)$/i;
+  /^(to taste|optional|as desired|as needed|pinch|to serve|small|large|medium|\d+\s*servings?)$/i;
 
 export function isUnmeasuredQuantity(q: string): boolean {
   return UNMEASURED_RE.test(q.trim());
@@ -105,7 +97,6 @@ export function isUnmeasuredQuantity(q: string): boolean {
 export function formatQuantity(amount: number, unit: string): string {
   const rounded = Math.round(amount * 100) / 100;
   if (unit === "units") return `${rounded}`;
-  if (unit === "serving") return `${rounded} ${rounded === 1 ? "serving" : "servings"}`;
   // Add a space before named cooking measures for readability
   if (unit === "cup" || unit === "tbsp" || unit === "tsp") return `${rounded} ${unit}`;
   return `${rounded}${unit}`;
