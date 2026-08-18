@@ -23,6 +23,41 @@ where quantity is null
   and unit is null
   and trim(coalesce(quantity_label, '')) ~* '^[0-9]+(?:\.[0-9]+)?\s+servings?$';
 
+-- Starter meals and older clients can still submit only quantity_label. Keep
+-- those writes structured without requiring every caller to know about the new
+-- serving unit immediately.
+create or replace function public.normalize_meal_ingredient_serving()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_match text[];
+begin
+  if new.quantity is null
+     and new.unit is null
+     and trim(coalesce(new.quantity_label, '')) ~* '^[0-9]+(?:\.[0-9]+)?\s+(servings?|portions?)$' then
+    v_match := regexp_match(
+      trim(new.quantity_label),
+      '^([0-9]+(?:\.[0-9]+)?)\s+(?:servings?|portions?)$',
+      'i'
+    );
+    new.quantity := v_match[1]::numeric;
+    new.unit := 'serving';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_normalize_meal_ingredient_serving
+  on public.meal_ingredients;
+
+create trigger trg_normalize_meal_ingredient_serving
+  before insert or update of quantity, unit, quantity_label
+  on public.meal_ingredients
+  for each row
+  execute function public.normalize_meal_ingredient_serving();
+
 create or replace function public.mark_meal_eaten(
   p_planned_meal_id uuid,
   p_user_id         uuid
