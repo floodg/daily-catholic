@@ -1,30 +1,32 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
-import Layout from './app/Layout'
-import Dashboard from './features/Dashboard'
-import MealsPage from './features/meals/MealsPage'
-import CreateAiMealPage from './features/meals/CreateAiMealPage'
-import PlanPage from './features/plan/PlanPage'
-import WorkoutsPage from './features/workouts/WorkoutsPage'
-import ShoppingPage from './features/shopping/ShoppingPage'
-import ShoppingTripsPage from './features/shopping-trips/ShoppingTripsPage'
-import InventoryPage from './features/inventory/InventoryPage'
-import PantryPage from './features/pantry/PantryPage'
-import StarterMealsPage from './features/onboarding/StarterMealsPage'
-import AccountSettingsPage from './features/settings/AccountSettingsPage'
-import AccountDetailsPage from './features/settings/AccountDetailsPage'
-import ProgramPage from './features/programs/ProgramPage'
-import StoreProductsPage from './features/store-products/StoreProductsPage'
-import IngredientProductsPage from './features/ingredient-products/IngredientProductsPage'
-import IngredientsPage from './features/ingredients/IngredientsPage'
-import Login from './pages/Login'
-import Signup from './pages/Signup'
-import MagicLinkLogin from './pages/MagicLinkLogin'
-import AdminDashboard from './pages/AdminDashboard'
 import { AuthProvider, useAuth } from './context/AuthProvider'
-import LandingPage from './components/LandingPage'
-import FiatModePage from './features/fiat/FiatModePage'
-import MacrosPage from './features/macros/MacrosPage'
-import WalkDetailPage from './features/walking/WalkDetailPage'
+
+const Layout = lazy(() => import('./app/Layout'))
+const Dashboard = lazy(() => import('./features/Dashboard'))
+const MealsPage = lazy(() => import('./features/meals/MealsPage'))
+const CreateAiMealPage = lazy(() => import('./features/meals/CreateAiMealPage'))
+const PlanPage = lazy(() => import('./features/plan/PlanPage'))
+const WorkoutsPage = lazy(() => import('./features/workouts/WorkoutsPage'))
+const ShoppingPage = lazy(() => import('./features/shopping/ShoppingPage'))
+const ShoppingTripsPage = lazy(() => import('./features/shopping-trips/ShoppingTripsPage'))
+const InventoryPage = lazy(() => import('./features/inventory/InventoryPage'))
+const PantryPage = lazy(() => import('./features/pantry/PantryPage'))
+const StarterMealsPage = lazy(() => import('./features/onboarding/StarterMealsPage'))
+const AccountSettingsPage = lazy(() => import('./features/settings/AccountSettingsPage'))
+const AccountDetailsPage = lazy(() => import('./features/settings/AccountDetailsPage'))
+const ProgramPage = lazy(() => import('./features/programs/ProgramPage'))
+const StoreProductsPage = lazy(() => import('./features/store-products/StoreProductsPage'))
+const IngredientProductsPage = lazy(() => import('./features/ingredient-products/IngredientProductsPage'))
+const IngredientsPage = lazy(() => import('./features/ingredients/IngredientsPage'))
+const Login = lazy(() => import('./pages/Login'))
+const Signup = lazy(() => import('./pages/Signup'))
+const MagicLinkLogin = lazy(() => import('./pages/MagicLinkLogin'))
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
+const LandingPage = lazy(() => import('./components/LandingPage'))
+const FiatModePage = lazy(() => import('./features/fiat/FiatModePage'))
+const MacrosPage = lazy(() => import('./features/macros/MacrosPage'))
+const WalkDetailPage = lazy(() => import('./features/walking/WalkDetailPage'))
 
 function AuthBootstrapLoading() {
   return (
@@ -83,46 +85,54 @@ function FiatSessionGuard() {
   return <Outlet />
 }
 
+function AppRoutes() {
+  return (
+    <Suspense fallback={<AuthBootstrapLoading />}>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/magic-link" element={<MagicLinkLogin />} />
+        <Route path="/app" element={<ProtectedRoute />}>
+          <Route path="onboarding" element={<StarterMealsPage />} />
+          <Route element={<Layout />}>
+            <Route index element={<Navigate to="/app/fiat" replace />} />
+            <Route element={<FiatSessionGuard />}>
+              <Route path="fiat" element={<FiatModePage />} />
+            </Route>
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="walking/:sessionId" element={<WalkDetailPage />} />
+            <Route path="meals/create-ai" element={<CreateAiMealPage />} />
+            <Route path="meals" element={<MealsPage />} />
+            <Route path="plan" element={<PlanPage />} />
+            <Route path="training" element={<ProgramPage />} />
+            <Route path="workouts" element={<WorkoutsPage />} />
+            <Route path="shopping" element={<ShoppingPage />} />
+            <Route path="shopping-trips" element={<ShoppingTripsPage />} />
+            <Route path="inventory" element={<InventoryPage />} />
+            <Route path="pantry" element={<PantryPage />} />
+            <Route path="macros" element={<MacrosPage />} />
+            <Route path="settings" element={<AccountSettingsPage />} />
+            <Route path="account" element={<AccountDetailsPage />} />
+            <Route path="store-products" element={<StoreProductsPage />} />
+            <Route path="ingredients" element={<IngredientsPage />} />
+            <Route path="ingredient-products" element={<IngredientProductsPage />} />
+          </Route>
+        </Route>
+        <Route path="/app" element={<AdminRoute />}>
+          <Route path="admin" element={<AdminDashboard />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
+  )
+}
+
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/magic-link" element={<MagicLinkLogin />} />
-          <Route path="/app" element={<ProtectedRoute />}>
-            <Route path="onboarding" element={<StarterMealsPage />} />
-            <Route element={<Layout />}>
-              <Route index element={<Navigate to="/app/fiat" replace />} />
-              <Route element={<FiatSessionGuard />}>
-                <Route path="fiat" element={<FiatModePage />} />
-              </Route>
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="walking/:sessionId" element={<WalkDetailPage />} />
-              <Route path="meals/create-ai" element={<CreateAiMealPage />} />
-              <Route path="meals" element={<MealsPage />} />
-              <Route path="plan" element={<PlanPage />} />
-              <Route path="training" element={<ProgramPage />} />
-              <Route path="workouts" element={<WorkoutsPage />} />
-              <Route path="shopping" element={<ShoppingPage />} />
-              <Route path="shopping-trips" element={<ShoppingTripsPage />} />
-              <Route path="inventory" element={<InventoryPage />} />
-              <Route path="pantry" element={<PantryPage />} />
-              <Route path="macros" element={<MacrosPage />} />
-              <Route path="settings" element={<AccountSettingsPage />} />
-              <Route path="account" element={<AccountDetailsPage />} />
-              <Route path="store-products" element={<StoreProductsPage />} />
-              <Route path="ingredients" element={<IngredientsPage />} />
-              <Route path="ingredient-products" element={<IngredientProductsPage />} />
-            </Route>
-          </Route>
-          <Route path="/app" element={<AdminRoute />}>
-            <Route path="admin" element={<AdminDashboard />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <AppRoutes />
       </AuthProvider>
     </BrowserRouter>
   )
