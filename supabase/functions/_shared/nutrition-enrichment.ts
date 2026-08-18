@@ -9,6 +9,7 @@ export interface NutritionSourceProduct {
 
 interface NutritionProfile {
   basis_unit: "g" | "ml";
+  /** Physical amount represented by one recipe unit/serving. */
   amount_per_unit: number | null;
   calories_kcal_per_100: number;
   protein_g_per_100: number;
@@ -93,7 +94,9 @@ Product URL: ${productUrl ?? "unknown"}
 
 Use web_search and prefer ${searchTarget}. Use the exact product nutrition panel when available. If the exact panel is unavailable, use a reasonable nutrition estimate for the closest equivalent food so the app can calculate macros automatically.
 
-Normalize all nutrition to per 100 g for solid foods or per 100 ml for liquids. If the source only gives values per serving, convert them using the serving size. For ingredients normally counted in units (for example eggs), set amount_per_unit to the approximate grams or ml represented by one unit; otherwise return null.
+Normalize all nutrition to per 100 g for solid foods or per 100 ml for liquids.
+
+IMPORTANT FOR PORTIONING: amount_per_unit is the physical g/ml represented by ONE recipe unit or serving. If the product page or nutrition panel gives a serving/portion size, populate amount_per_unit with that serving size converted to g/ml. If it gives both pack size and servings/portions per pack, derive it (for example 1 kg with 10 portions => amount_per_unit = 100 and basis_unit = "g"). For naturally counted foods such as eggs, use the approximate g/ml for one item. Return null only when no reliable unit/serving size can be established. Do not invent a serving size from nutrition values alone.
 
 Return JSON only in exactly this shape:
 {
