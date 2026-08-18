@@ -1,0 +1,27 @@
+name: Sync Google Tasks
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sync-google-tasks
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Invoke sync-google-tasks
+        env:
+          SUPABASE_URL: https://ekerlzhppqlgyywsabfn.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_qWzpjt1lHi0MiDAwGRf64g_ate0gmka
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST "$SUPABASE_URL/functions/v1/sync-google-tasks" \
+            --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            --header "Content-Type: application/json" \
+            --data '{}'
