@@ -220,7 +220,6 @@ const callGeminiMeal = async (
           }],
         }],
         generationConfig: {
-          temperature: 0.7,
           maxOutputTokens: 4096,
           responseMimeType: "application/json",
         },
@@ -257,7 +256,7 @@ const callClaudeMeal = async (
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) {
     throw new Error(
-      "Gemini quota exceeded and ANTHROPIC_API_KEY is not set — add it to .env for local Claude fallback",
+      "ANTHROPIC_API_KEY is not configured for Claude fallback",
     );
   }
 
@@ -317,7 +316,7 @@ const generateMeal = async (
       return { meal, provider: "gemini" };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
-      const retryable = /404|503|429|UNAVAILABLE|timed out|high demand|quota/i.test(
+      const retryable = /401|403|404|503|429|UNAVAILABLE|timed out|high demand|quota|GEMINI_API_KEY is not configured/i.test(
         lastError.message,
       );
       if (/429|quota/i.test(lastError.message)) geminiQuotaHit = true;
