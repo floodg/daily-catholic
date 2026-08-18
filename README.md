@@ -2,7 +2,7 @@
 
 A React app for **integrated Catholic life**: **Fiat** (Divine Will spirituality), **soul** (Scripture, Mass, examen), and **body** (ketogenic meals, training, macros, shopping). The public landing introduces the four pillars — Soul, Divine Will, Body, and Order — and signed-in users use a unified **Daily Catholic** shell with **Fiat Mode** as the home experience.
 
-All meal planning, inventory, shopping, and profile data are stored in **Supabase** (PostgreSQL) with **Row Level Security**.
+All meal planning, inventory, shopping, macro, and profile data are stored in **Supabase** (PostgreSQL) with **Row Level Security**.
 
 ## Features
 
@@ -18,7 +18,31 @@ All meal planning, inventory, shopping, and profile data are stored in **Supabas
 - **Shopping List** — Built from your plan; links to store products where configured.
 - **Trip History** — Shopping trips and purchases.
 - **Workouts** — Templates and sessions (with local persistence where noted in code).
-- **My Macros** — Macro tracking.
+- **My Macros** — Daily calorie and macro tracking integrated with Meals and the Weekly Planner.
+
+#### My Macros
+
+The **My Macros** dashboard uses the meals and planned meals already in Daily Catholic rather than creating a separate food log.
+
+- Set personal daily targets for **calories, protein, fat, total carbs, and net carbs**.
+- View **consumed** amounts separately from **still-planned** meals for the selected day.
+- Completed planned meals count toward consumed intake; skipped meals are excluded.
+- Planned-meal **servings** are included in the calculation.
+- View per-meal calorie and macro breakdowns.
+- Maintain user-specific nutrition profiles for ingredients, normalized per **100 g** or **100 ml**.
+- Support unit-based foods such as eggs through an amount-per-unit conversion.
+- Mass conversions support **g/kg** and volume conversions support **ml/l/tsp/tbsp/cup**.
+- Missing or incompatible nutrition data is shown as **incomplete** rather than silently counted as zero.
+- **Net carbs** are calculated as `max(total carbs - fibre, 0)`.
+- Browse a **seven-day macro history** and select previous days from the dashboard.
+- Macro targets and ingredient nutrition profiles are user-scoped and protected by Supabase **RLS**.
+
+Macro persistence is provided by:
+
+- **`macro_targets`** — one row per user containing daily targets.
+- **`user_ingredient_nutrition`** — per-user ingredient nutrition profiles and unit mappings.
+
+The main implementation lives under **`src/features/macros/`** and the database schema is defined in **`supabase/migrations/20260819051000_add_macros_feature.sql`**.
 
 ### Catalog & linking
 
@@ -94,8 +118,19 @@ Migrations live in **`supabase/migrations/`** (applied in filename order). They 
 - Ingredients catalog, store products, product linking, shopping list & trips  
 - Inventory / purchase ledger, pantry preferences, `mark_meal_eaten` and related RPCs  
 - Programs / training-related schema where applicable  
+- Macro targets and user-specific ingredient nutrition profiles  
 
 For the exact history, browse the migration files (there are many incremental updates).
+
+### Production migrations
+
+GitHub Actions automatically applies Supabase migrations when migration changes are pushed or merged to **`main`**. The workflow is defined in **`.github/workflows/supabase-deploy.yml`** and runs `supabase db push` against the production project before deploying Supabase Edge Functions.
+
+The workflow expects these GitHub Actions repository secrets:
+
+- `SUPABASE_ACCESS_TOKEN`
+- `SUPABASE_PROJECT_REF`
+- `SUPABASE_DB_PASSWORD`
 
 ## Seed data
 
@@ -132,7 +167,8 @@ src/
 │   ├── plan/            # Weekly planner
 │   ├── meals/
 │   ├── shopping/, shopping-trips/
-│   ├── workouts/, programs/, macros/
+│   ├── workouts/, programs/
+│   ├── macros/          # Macro dashboard, API and calculations
 │   ├── pantry/, inventory/
 │   ├── ingredients/, store-products/, ingredient-products/
 │   ├── onboarding/
