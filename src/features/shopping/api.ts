@@ -166,7 +166,10 @@ export interface PendingShoppingListItem {
   createdAt: string;
 }
 
-/** Reads unchecked items from shopping_list (e.g. synced from Google Tasks). */
+/**
+ * Reads unchecked standalone items from shopping_list (e.g. Google Tasks rows
+ * that are not already represented by a shopping-trip product card).
+ */
 export async function fetchPendingShoppingListItems(): Promise<PendingShoppingListItem[]> {
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
@@ -177,6 +180,7 @@ export async function fetchPendingShoppingListItems(): Promise<PendingShoppingLi
     .select('id, ingredient_name, source, created_at')
     .eq('user_id', user.id)
     .eq('is_checked', false)
+    .is('shopping_trip_item_id', null)
     .order('created_at', { ascending: true });
   if (error) throw error;
 
@@ -232,4 +236,3 @@ export async function unmarkPurchasedShoppingItem(id: string): Promise<void> {
     .eq('user_id', user.id);
   if (error) throw error;
 }
-
