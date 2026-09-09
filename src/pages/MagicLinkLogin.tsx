@@ -1,9 +1,19 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import './auth.css'
 
+type MagicLinkLocationState = { from?: { pathname?: string } }
+
+function buildAuthRedirectTo(nextPath = '/app/fiat') {
+  const safeNextPath = nextPath.startsWith('/app') ? nextPath : '/app/fiat'
+  return `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNextPath)}`
+}
+
 export default function MagicLinkLogin() {
+  const location = useLocation()
+  const nextPath =
+    (location.state as MagicLinkLocationState | null)?.from?.pathname ?? '/app/fiat'
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -16,16 +26,17 @@ export default function MagicLinkLogin() {
     setMessage(null)
 
     const { error } = await supabase.auth.signInWithOtp({
-      email,
+      email: email.trim(),
       options: {
-        emailRedirectTo: `${window.location.origin}/login`,
+        emailRedirectTo: buildAuthRedirectTo(nextPath),
+        shouldCreateUser: true,
       },
     })
 
     if (error) {
       setError(error.message)
     } else {
-      setMessage('Check your email for a login link')
+      setMessage('Check your email for a login link. It will securely finish signing you in.')
     }
 
     setLoading(false)

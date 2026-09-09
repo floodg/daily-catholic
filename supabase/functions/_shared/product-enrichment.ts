@@ -37,11 +37,134 @@ export type LogFn = (
   context?: Record<string, unknown> | null,
 ) => void;
 
-/** Stable default — preview models often 503 under load. Override with GEMINI_MODEL. */
 export const GEMINI_DEFAULT_MODEL = "gemini-2.0-flash";
 export const GEMINI_FALLBACK_MODEL = "gemini-2.0-flash-lite";
 
-/** Best-effort extraction when LLM JSON is truncated or wrapped in prose. */
+const STORE_DOMAINS: Record<string, string> = {
+  Coles: "coles.com.au",
+  Woolworths: "woolworths.com.au",
+  Aldi: "aldi.com.au",
+  IGA: "iga.com.au",
+};
+
+const NON_FOOD_TERMS = [
+  "body lotion",
+  "lotion",
+  "moisturiser",
+  "moisturizer",
+  "skin care",
+  "skincare",
+  "body wash",
+  "shampoo",
+  "conditioner",
+  "soap",
+  "deodorant",
+  "cleaner",
+  "cleaning",
+  "detergent",
+  "dishwashing",
+  "laundry",
+  "toilet",
+  "bathroom",
+  "cosmetic",
+  "makeup",
+  "beauty",
+  "sunscreen",
+  "hand cream",
+  "face cream",
+  "pet food",
+  "dog food",
+  "cat food",
+];
+
+const STOP_WORDS = new Set([
+  "fresh",
+  "organic",
+  "natural",
+  "australian",
+  "australia",
+  "coles",
+  "woolworths",
+  "aldi",
+  "iga",
+  "the",
+  "and",
+]);
+
+const normalize = (value: string): string => value
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim();
+
+const ingredientTokens = (value: string): string[] => normalize(value)
+  .split(/\s+/)
+  .filter((t) => t.length > 1 && !STOP_WORDS.has(t));
+
+const isLikelyFoodName = (name: string, category?: string | null): boolean => {
+  const haystack = `${normalize(name)} ${normalize(category ?? "")}`;
+  return !NON_FOOD_TERMS.some((term) => haystack.includes(normalize(term)));
+};
+
+const storeUrlMatches = (url: string | null, store: string): boolean => {
+  if (!url) return false;
+  const expected = STORE_DOMAINS[store];
+  if (!expected) return true;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === expected || host.endsWith(`.${expected}`);
+  } catch {
+    return false;
+  }
+};
+
+const scoreProductMatch = (
+  ingredient: string,
+  productName: string,
+  category?: string | null,
+): number => {
+  if (!isLikelyFoodName(productName, category)) return -1000;
+
+  const ingredientNorm = normalize(ingredient);
+  const productNorm = normalize(productName);
+  const tokens = ingredientTokens(ingredient);
+  if (!ingredientNorm || !productNorm || tokens.length === 0) return -1000;
+
+  let score = 0;
+  if (productNorm === ingredientNorm) score += 120;
+  if (productNorm.startsWith(`${ingredientNorm} `)) score += 80;
+  if (productNorm.includes(ingredientNorm)) score += 60;
+
+  const matchedTokens = tokens.filter((t) => productNorm.includes(t));
+  score += matchedTokens.length * 25;
+  if (matchedTokens.length === tokens.length) score += 40;
+  if (matchedTokens.length === 0) return -1000;
+
+  // Prefer concise grocery product names over unrelated products that merely contain one token.
+  const extraWordPenalty = Math.max(0, productNorm.split(/\s+/).length - tokens.length - 4);
+  score -= extraWordPenalty * 3;
+  return score;
+};
+
+const pickBestExisting = (
+  rows: StoreProductRow[],
+  productName: string,
+): StoreProductRow | null => {
+  const ranked = rows
+    .map((row) => ({ row, score: scoreProductMatch(productName, row.name) }))
+    .filter((x) => x.score >= 50)
+    .sort((a, b) => b.score - a.score);
+  return ranked[0]?.row ?? null;
+};
+
+const rankExisting = (
+  rows: StoreProductRow[],
+  productName: string,
+): StoreProductRow[] => rows
+  .map((row) => ({ row, score: scoreProductMatch(productName, row.name) }))
+  .filter((x) => x.score >= 50)
+  .sort((a, b) => b.score - a.score)
+  .map((x) => x.row);
+
 export const parseEnrichmentPayload = (
   text: string,
   productName: string,
@@ -49,16 +172,15 @@ export const parseEnrichmentPayload = (
 ): GeminiProduct | null => {
   let jsonStr = String(text);
   const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) {
-    jsonStr = fenceMatch[1];
-  } else {
+  if (fenceMatch) jsonStr = fenceMatch[1];
+  else {
     const objMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (objMatch) jsonStr = objMatch[0];
   }
 
   try {
-    const parsed = JSON.parse(jsonStr.trim());
-    return {
+    const parsed = JSON.parse(jsonStr.trim()) as Record<string, unknown>;
+    const result: GeminiProduct = {
       name: String(parsed.name ?? productName).trim(),
       brand: parsed.brand ? String(parsed.brand).trim() : null,
       price: typeof parsed.price === "number" ? parsed.price : null,
@@ -69,67 +191,53 @@ export const parseEnrichmentPayload = (
       store,
       enriched: true,
     };
+    if (!isLikelyFoodName(result.name, result.category)) return null;
+    if (scoreProductMatch(productName, result.name, result.category) < 50) return null;
+    if (store !== "Other" && !storeUrlMatches(result.url, store)) return null;
+    return result;
   } catch {
-    const pick = (key: string): string | null => {
-      const m = jsonStr.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
-      return m ? m[1].replace(/\\"/g, '"').trim() : null;
-    };
-    const name = pick("name");
-    if (!name) return null;
-    const priceRaw = jsonStr.match(/"price"\s*:\s*(\d+(?:\.\d+)?)/);
-    return {
-      name,
-      brand: pick("brand"),
-      price: priceRaw ? Number(priceRaw[1]) : null,
-      unit: pick("unit"),
-      url: pick("url"),
-      image_url: pick("image_url"),
-      category: pick("category"),
-      store,
-      enriched: true,
-    };
+    return null;
   }
 };
 
-export type PersistCandidateOptions = {
-  /** When set, new products are owned by this user (not the shared catalog). */
-  userId?: string;
-};
+export type PersistCandidateOptions = { userId?: string };
 
-const packSizesFromLabel = (
-  sizeLabel: string | null,
-): {
-  pack_size_g: number | null;
-  pack_size_ml: number | null;
-  pack_size_units: number | null;
-} => {
+const packSizesFromLabel = (sizeLabel: string | null) => {
   const s = (sizeLabel ?? "").toLowerCase();
   const kg = s.match(/(\d+(?:\.\d+)?)\s*kg/);
-  if (kg) {
-    return { pack_size_g: Number(kg[1]) * 1000, pack_size_ml: null, pack_size_units: null };
-  }
+  if (kg) return { pack_size_g: Number(kg[1]) * 1000, pack_size_ml: null, pack_size_units: null };
   const g = s.match(/(\d+(?:\.\d+)?)\s*g\b/);
-  if (g) {
-    return { pack_size_g: Number(g[1]), pack_size_ml: null, pack_size_units: null };
-  }
+  if (g) return { pack_size_g: Number(g[1]), pack_size_ml: null, pack_size_units: null };
   const liter = s.match(/(\d+(?:\.\d+)?)\s*l\b/);
-  if (liter) {
-    return {
-      pack_size_g: null,
-      pack_size_ml: Number(liter[1]) * 1000,
-      pack_size_units: null,
-    };
-  }
+  if (liter) return { pack_size_g: null, pack_size_ml: Number(liter[1]) * 1000, pack_size_units: null };
   const ml = s.match(/(\d+(?:\.\d+)?)\s*ml\b/);
-  if (ml) {
-    return { pack_size_g: null, pack_size_ml: Number(ml[1]), pack_size_units: null };
-  }
+  if (ml) return { pack_size_g: null, pack_size_ml: Number(ml[1]), pack_size_units: null };
   const pack = s.match(/(\d+)\s*pack\b/);
-  if (pack) {
-    return { pack_size_g: null, pack_size_ml: null, pack_size_units: Number(pack[1]) };
-  }
-  // User-linked rows require at least one pack size.
+  if (pack) return { pack_size_g: null, pack_size_ml: null, pack_size_units: Number(pack[1]) };
   return { pack_size_g: null, pack_size_ml: null, pack_size_units: 1 };
+};
+
+const queryExistingRows = async (
+  supabase: AnySupabaseClient,
+  productName: string,
+  store: string,
+  userId?: string,
+  limit = 30,
+): Promise<StoreProductRow[]> => {
+  const tokens = ingredientTokens(productName);
+  const searchTerm = [...tokens].sort((a, b) => b.length - a.length)[0] ?? productName.trim();
+  if (!searchTerm) return [];
+
+  let query = supabase
+    .from("store_products")
+    .select("id, name, brand, size_label, store, product_url, image_url")
+    .ilike("name", `%${searchTerm}%`)
+    .eq("store", store)
+    .limit(limit);
+
+  query = userId ? query.eq("user_id", userId) : query.is("user_id", null);
+  const { data } = await query;
+  return (data as StoreProductRow[] | null) ?? [];
 };
 
 export const lookupExistingProduct = async (
@@ -138,57 +246,64 @@ export const lookupExistingProduct = async (
   store: string,
   options?: PersistCandidateOptions,
 ): Promise<StoreProductRow | null> => {
-  const q = productName.trim();
-  if (!q) return null;
-
   if (options?.userId) {
-    const { data: own } = await supabase
-      .from("store_products")
-      .select("id, name, brand, size_label, store, product_url, image_url")
-      .ilike("name", `%${q}%`)
-      .eq("store", store)
-      .eq("user_id", options.userId)
-      .limit(1)
-      .maybeSingle();
-    if (own) return own as StoreProductRow;
+    const own = await queryExistingRows(supabase, productName, store, options.userId);
+    const bestOwn = pickBestExisting(own, productName);
+    if (bestOwn) return bestOwn;
   }
-
-  const { data } = await supabase
-    .from("store_products")
-    .select("id, name, brand, size_label, store, product_url, image_url")
-    .ilike("name", `%${q}%`)
-    .eq("store", store)
-    .is("user_id", null)
-    .limit(1)
-    .maybeSingle();
-  return (data as StoreProductRow | null) ?? null;
+  const shared = await queryExistingRows(supabase, productName, store);
+  return pickBestExisting(shared, productName);
 };
 
-export const enrichWithClaude = async (
+const emptyProduct = (productName: string, store: string): GeminiProduct => ({
+  name: productName,
+  brand: null,
+  price: null,
+  unit: null,
+  url: null,
+  image_url: null,
+  category: null,
+  store,
+  enriched: false,
+});
+
+const storeSitePrompt = (productName: string, store: string, count: number) => {
+  const domain = STORE_DOMAINS[store];
+  const source = domain ? `ONLY ${domain}` : `the official ${store} website`;
+  return `Search ${source} for the grocery ingredient "${productName}".
+Use only real grocery/food product pages from that store. Do not return cosmetics, body care, cleaning, household, pet or non-food products even if their name contains the ingredient word.
+The direct product URL MUST be on ${source}. If you cannot verify a real matching store product page, return an empty array.
+Return up to ${count} best matching grocery products as JSON only:
+[
+  {
+    "name": "full product name exactly as listed by the store",
+    "brand": "brand or null",
+    "price": 3.5,
+    "unit": "pack size e.g. 250g",
+    "url": "direct product URL on the selected store domain",
+    "image_url": "image URL or null",
+    "category": "grocery category"
+  }
+]`;
+};
+
+export const searchProductsWithClaude = async (
   productName: string,
   store: string,
   log: LogFn,
-): Promise<GeminiProduct> => {
-  const fallback: GeminiProduct = {
-    name: productName,
-    brand: null,
-    price: null,
-    unit: null,
-    url: null,
-    image_url: null,
-    category: null,
-    store,
-    enriched: false,
-  };
-
+): Promise<GeminiProduct[]> => {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) {
-    log(`[claude] ${store} NO API KEY`, "warn", { store, product_name: productName });
-    return fallback;
+    log(`[claude-store] ${store} NO API KEY`, "warn", { store, product_name: productName });
+    return [];
   }
-  log(`[claude] ${store} calling API for "${productName}"`, "info", {
+
+  const domain = STORE_DOMAINS[store];
+  const searchQuery = domain ? `${productName} site:${domain}` : `${productName} ${store} Australia`;
+  log(`[claude-store] searching official ${store} site for "${productName}"`, "info", {
     store,
     product_name: productName,
+    domain: domain ?? null,
   });
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -201,180 +316,70 @@ export const enrichWithClaude = async (
     },
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
+      max_tokens: 2048,
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
       messages: [{
         role: "user",
-        content: `Use the web_search tool to search for: ${productName} site:${store.toLowerCase()}.com.au
-
-Find the best matching product listing on ${store} Australia and return ONLY a JSON object with no markdown, no backticks, no explanation:
-{
-  "name": "full product name as listed",
-  "brand": "brand name or null",
-  "price": 3.50,
-  "unit": "pack size or weight e.g. 500g, 6 pack",
-  "url": "direct product URL on ${store.toLowerCase()}.com.au",
-  "image_url": "product image URL or null",
-  "category": "e.g. Cleaning, Household, Dairy, Bakery, Pantry"
-}`,
+        content: `Use web_search for exactly this store-restricted search: ${searchQuery}\n\n${storeSitePrompt(productName, store, 6)}`,
       }],
     }),
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    log(
-      `[claude] ${store} HTTP ${res.status}: ${errText.slice(0, 300)}`,
-      "error",
-      {
-        store,
-        product_name: productName,
-        status: res.status,
-        body_preview: errText.slice(0, 300),
-      },
-    );
-    return fallback;
+    const body = await res.text();
+    log(`[claude-store] ${store} HTTP ${res.status}: ${body.slice(0, 300)}`, "error", {
+      store,
+      product_name: productName,
+      status: res.status,
+    });
+    return [];
   }
 
   const data = await res.json();
-  const textBlock = [...(data?.content ?? [])].reverse().find((b: { type?: string }) =>
-    b.type === "text"
-  );
-  const text = (textBlock as { text?: string } | undefined)?.text ?? "{}";
-  log(`[claude] ${store} raw text: ${String(text).slice(0, 300)}`, "debug", {
-    store,
-    product_name: productName,
-  });
-
-  const parsed = parseEnrichmentPayload(String(text), productName, store);
-  if (parsed) return parsed;
-
-  log(`[claude] ${store} could not extract product JSON`, "error", {
-    store,
-    product_name: productName,
-    raw_preview: String(text).slice(0, 300),
-  });
-  return fallback;
+  const textBlock = [...(data?.content ?? [])].reverse().find((b: { type?: string }) => b.type === "text");
+  const text = (textBlock as { text?: string } | undefined)?.text ?? "[]";
+  return parseEnrichmentListPayload(String(text), productName, store);
 };
 
+export const enrichWithClaude = async (
+  productName: string,
+  store: string,
+  log: LogFn,
+): Promise<GeminiProduct> => {
+  const products = await searchProductsWithClaude(productName, store, log);
+  return products[0] ?? emptyProduct(productName, store);
+};
+
+// Retained for compatibility, but store product retrieval now uses the store site as source of truth.
 export const enrichWithGemini = async (
   productName: string,
   store: string,
   log: LogFn,
-  options?: { timeoutMs?: number },
+  _options?: { timeoutMs?: number },
 ): Promise<GeminiProduct> => {
-  const fallback: GeminiProduct = {
-    name: productName,
-    brand: null,
-    price: null,
-    unit: null,
-    url: null,
-    image_url: null,
-    category: null,
-    store,
-    enriched: false,
-  };
-
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) {
-    log(`[gemini] ${store} NO API KEY`, "debug", { store, product_name: productName });
-    return fallback;
-  }
-
-  const model = Deno.env.get("GEMINI_MODEL")?.trim() || GEMINI_DEFAULT_MODEL;
-  const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const timeoutMs = options?.timeoutMs ?? 25_000;
-
-  log(`[gemini] ${store} calling API for "${productName}" (model=${model})`, "info", {
-    store,
-    product_name: productName,
-    model,
-  });
-
-  let res: Response;
-  try {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text:
-              `Search the web (from your training + browsing capabilities if available) for a product listing on ${store} Australia matching: ${productName}.
-
-Return ONLY a JSON object (no markdown/backticks/explanations) in this exact shape:
-{
-  "name": "full product name as listed",
-  "brand": "brand name or null",
-  "price": 3.50,
-  "unit": "pack size or weight e.g. 500g, 6 pack",
-  "url": "direct product URL on the store website if found, otherwise null",
-  "image_url": "product image URL or null",
-  "category": "e.g. Cleaning, Household, Dairy, Bakery, Pantry"
-}`,
-          }],
-        }],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 2048,
-          responseMimeType: "application/json",
-        },
-      }),
-    });
-  } catch (err) {
-    log(`[gemini] ${store} fetch failed: ${err instanceof Error ? err.message : String(err)}`, "error", {
-      store,
-      product_name: productName,
-    });
-    return fallback;
-  }
-
-  if (!res.ok) {
-    const errText = await res.text();
-    log(
-      `[gemini] ${store} HTTP ${res.status}: ${errText.slice(0, 300)}`,
-      "error",
-      {
-        store,
-        product_name: productName,
-        status: res.status,
-        body_preview: errText.slice(0, 300),
-      },
-    );
-    return fallback;
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.find(
-    (p: { text?: string }) => typeof p?.text === "string",
-  )?.text ?? "{}";
-  log(`[gemini] ${store} raw text: ${String(text).slice(0, 300)}`, "debug", {
+  log(`[gemini-store] skipped for "${productName}"; official store-site lookup is required`, "debug", {
     store,
     product_name: productName,
   });
+  return emptyProduct(productName, store);
+};
 
-  const parsed = parseEnrichmentPayload(String(text), productName, store);
-  if (parsed) return parsed;
-
-  log(`[gemini] ${store} could not extract product JSON`, "error", {
+export const searchProductsWithGemini = async (
+  productName: string,
+  store: string,
+  log: LogFn,
+  _options?: { timeoutMs?: number },
+): Promise<GeminiProduct[]> => {
+  log(`[gemini-store] skipped multi-search for "${productName}"; official store-site lookup is required`, "debug", {
     store,
     product_name: productName,
-    raw_preview: String(text).slice(0, 300),
   });
-  return fallback;
+  return [];
 };
 
 export type CollectCandidateOptions = {
-  /** Skip Claude (web_search) — faster for interactive flows. */
   skipClaude?: boolean;
-  /** Skip Gemini (e.g. when quota is exhausted). */
   skipGemini?: boolean;
-  /** Try Gemini before Claude. */
   preferGemini?: boolean;
 };
 
@@ -385,47 +390,20 @@ export const collectCandidate = async (
   log: LogFn,
   options?: CollectCandidateOptions & PersistCandidateOptions,
 ): Promise<Candidate | null> => {
-  const cached = await lookupExistingProduct(supabase, productName, store, {
-    userId: options?.userId,
-  });
+  // 1. Database catalog first.
+  const cached = await lookupExistingProduct(supabase, productName, store, { userId: options?.userId });
   if (cached) {
-    log(
-      `[collect] ${store}: cache hit id=${cached.id} name="${cached.name}"`,
-      "info",
-      { store, product_name: productName, store_product_id: cached.id },
-    );
+    log(`[collect] ${store}: ranked catalog hit id=${cached.id} name="${cached.name}"`, "info", {
+      store,
+      product_name: productName,
+      store_product_id: cached.id,
+    });
     return { ...cached, price: null, category: null, isNew: false };
   }
 
-  let enriched: GeminiProduct = {
-    name: productName,
-    brand: null,
-    price: null,
-    unit: null,
-    url: null,
-    image_url: null,
-    category: null,
-    store,
-    enriched: false,
-  };
-
-  const tryClaude = async () => {
-    if (options?.skipClaude) return;
-    enriched = await enrichWithClaude(productName, store, log);
-  };
-  const tryGemini = async () => {
-    if (options?.skipGemini) return;
-    const gemini = await enrichWithGemini(productName, store, log, { timeoutMs: 20_000 });
-    if (gemini.enriched) enriched = gemini;
-  };
-
-  if (options?.preferGemini || options?.skipClaude) {
-    await tryGemini();
-    if (!enriched.enriched) await tryClaude();
-  } else {
-    await tryClaude();
-    if (!enriched.enriched) await tryGemini();
-  }
+  // 2. No good catalog match: retrieve from the official store site.
+  if (options?.skipClaude) return null;
+  const enriched = await enrichWithClaude(productName, store, log);
   if (!enriched.enriched) return null;
 
   return {
@@ -449,14 +427,12 @@ export const persistCandidate = async (
   options?: PersistCandidateOptions,
 ): Promise<Candidate | null> => {
   if (!candidate.isNew) return candidate;
+  if (!isLikelyFoodName(candidate.name, candidate.category)) return null;
+  if (candidate.store !== "Other" && !storeUrlMatches(candidate.product_url, candidate.store)) return null;
 
   const pack = options?.userId
     ? packSizesFromLabel(candidate.size_label)
-    : {
-      pack_size_g: null as number | null,
-      pack_size_ml: null as number | null,
-      pack_size_units: null as number | null,
-    };
+    : { pack_size_g: null, pack_size_ml: null, pack_size_units: null };
 
   const { data, error } = await supabase
     .from("store_products")
@@ -476,39 +452,18 @@ export const persistCandidate = async (
     .single();
 
   if (error || !data) {
-    log(
-      `[persist] store_products insert FAILED for "${candidate.name}" (${candidate.store}): ${
-        JSON.stringify(error)
-      }`,
-      "error",
-      {
-        store: candidate.store,
-        product_name: candidate.name,
-        table: "store_products",
-        user_id: options?.userId ?? null,
-        error,
-      },
-    );
+    log(`[persist] store_products insert FAILED for "${candidate.name}"`, "error", {
+      store: candidate.store,
+      product_name: candidate.name,
+      user_id: options?.userId ?? null,
+      error,
+    });
     return null;
   }
 
-  const insertedId = (data as { id: string }).id;
-  log(
-    `[persist] store_products inserted id=${insertedId} name="${candidate.name}" store=${candidate.store}${
-      options?.userId ? " (user-owned)" : " (global)"
-    }`,
-    "info",
-    {
-      store: candidate.store,
-      product_name: candidate.name,
-      store_product_id: insertedId,
-      user_id: options?.userId ?? null,
-    },
-  );
-  return { ...candidate, id: insertedId, isNew: false };
+  return { ...candidate, id: (data as { id: string }).id, isNew: false };
 };
 
-/** Parse a JSON array (or `{ products: [...] }`) of store product matches. */
 export const parseEnrichmentListPayload = (
   text: string,
   productName: string,
@@ -516,9 +471,8 @@ export const parseEnrichmentListPayload = (
 ): GeminiProduct[] => {
   let jsonStr = String(text);
   const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) {
-    jsonStr = fenceMatch[1];
-  } else {
+  if (fenceMatch) jsonStr = fenceMatch[1];
+  else {
     const arrMatch = jsonStr.match(/\[[\s\S]*\]/);
     const objMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (arrMatch) jsonStr = arrMatch[0];
@@ -529,41 +483,31 @@ export const parseEnrichmentListPayload = (
     const parsed = JSON.parse(jsonStr.trim()) as unknown;
     const rows = Array.isArray(parsed)
       ? parsed
-      : (parsed && typeof parsed === "object" &&
-          Array.isArray((parsed as { products?: unknown }).products))
+      : parsed && typeof parsed === "object" && Array.isArray((parsed as { products?: unknown }).products)
       ? (parsed as { products: unknown[] }).products
       : [];
 
-    const out: GeminiProduct[] = [];
-    for (const row of rows) {
-      if (!row || typeof row !== "object") continue;
-      const r = row as Record<string, unknown>;
-      const name = typeof r.name === "string" && r.name.trim()
-        ? r.name.trim()
-        : null;
-      if (!name) continue;
-      out.push({
-        name,
-        brand: typeof r.brand === "string" && r.brand.trim()
-          ? r.brand.trim()
-          : null,
+    return rows
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+      .map((r) => ({
+        name: typeof r.name === "string" ? r.name.trim() : "",
+        brand: typeof r.brand === "string" && r.brand.trim() ? r.brand.trim() : null,
         price: typeof r.price === "number" ? r.price : null,
         unit: typeof r.unit === "string" && r.unit.trim() ? r.unit.trim() : null,
         url: typeof r.url === "string" && r.url.trim() ? r.url.trim() : null,
-        image_url: typeof r.image_url === "string" && r.image_url.trim()
-          ? r.image_url.trim()
-          : null,
-        category: typeof r.category === "string" && r.category.trim()
-          ? r.category.trim()
-          : null,
+        image_url: typeof r.image_url === "string" && r.image_url.trim() ? r.image_url.trim() : null,
+        category: typeof r.category === "string" && r.category.trim() ? r.category.trim() : null,
         store,
         enriched: true,
-      });
-    }
-    return out;
+      } as GeminiProduct))
+      .filter((p) => p.name.length > 0)
+      .filter((p) => isLikelyFoodName(p.name, p.category))
+      .filter((p) => scoreProductMatch(productName, p.name, p.category) >= 50)
+      .filter((p) => store === "Other" || storeUrlMatches(p.url, store))
+      .sort((a, b) => scoreProductMatch(productName, b.name, b.category) - scoreProductMatch(productName, a.name, a.category));
   } catch {
     const single = parseEnrichmentPayload(text, productName, store);
-    return single?.enriched ? [single] : [];
+    return single ? [single] : [];
   }
 };
 
@@ -574,197 +518,36 @@ export const lookupExistingProducts = async (
   limit = 8,
   options?: PersistCandidateOptions,
 ): Promise<StoreProductRow[]> => {
-  const q = productName.trim();
-  if (!q) return [];
-
   const out: StoreProductRow[] = [];
   const seen = new Set<string>();
 
   if (options?.userId) {
-    const { data: own } = await supabase
-      .from("store_products")
-      .select("id, name, brand, size_label, store, product_url, image_url")
-      .ilike("name", `%${q}%`)
-      .eq("store", store)
-      .eq("user_id", options.userId)
-      .limit(limit);
-    for (const row of (own as StoreProductRow[] | null) ?? []) {
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      out.push(row);
+    for (const row of rankExisting(await queryExistingRows(supabase, productName, store, options.userId), productName)) {
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        out.push(row);
+      }
+      if (out.length >= limit) return out;
     }
   }
 
-  if (out.length < limit) {
-    const { data } = await supabase
-      .from("store_products")
-      .select("id, name, brand, size_label, store, product_url, image_url")
-      .ilike("name", `%${q}%`)
-      .eq("store", store)
-      .is("user_id", null)
-      .limit(limit - out.length);
-    for (const row of (data as StoreProductRow[] | null) ?? []) {
-      if (seen.has(row.id)) continue;
+  for (const row of rankExisting(await queryExistingRows(supabase, productName, store), productName)) {
+    if (!seen.has(row.id)) {
       seen.add(row.id);
       out.push(row);
     }
+    if (out.length >= limit) break;
   }
-
   return out;
 };
 
-const candidateKey = (c: {
-  name: string;
-  brand?: string | null;
-  product_url?: string | null;
-}): string => {
+const candidateKey = (c: { name: string; brand?: string | null; product_url?: string | null }): string => {
   if (c.product_url) return `url:${c.product_url.trim().toLowerCase()}`;
   return `name:${(c.brand ?? "").trim().toLowerCase()}|${c.name.trim().toLowerCase()}`;
 };
 
-const multiSearchPrompt = (productName: string, store: string) =>
-  `Find 3 to 6 real product listings on ${store} Australia that match the grocery ingredient "${productName}".
-Prefer common pack sizes a home cook would buy. Diversify brands/sizes when possible.
-Return ONLY a JSON array (no markdown, no backticks, no explanation) of objects:
-[
-  {
-    "name": "full product name as listed",
-    "brand": "brand name or null",
-    "price": 3.50,
-    "unit": "pack size or weight e.g. 500g, 6 pack",
-    "url": "direct product URL on ${store.toLowerCase()}.com.au if known, otherwise null",
-    "image_url": "product image URL or null",
-    "category": "e.g. Dairy, Bakery, Pantry, Household"
-  }
-]`;
+export type CollectCandidatesOptions = CollectCandidateOptions & PersistCandidateOptions & { limit?: number };
 
-export const searchProductsWithClaude = async (
-  productName: string,
-  store: string,
-  log: LogFn,
-): Promise<GeminiProduct[]> => {
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) {
-    log(`[claude-multi] ${store} NO API KEY`, "warn", { store, product_name: productName });
-    return [];
-  }
-
-  log(`[claude-multi] ${store} calling API for "${productName}"`, "info", {
-    store,
-    product_name: productName,
-  });
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta": "web-search-2025-03-05",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
-      messages: [{
-        role: "user",
-        content:
-          `Use the web_search tool to search for: ${productName} site:${store.toLowerCase()}.com.au\n\n${multiSearchPrompt(productName, store)}`,
-      }],
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    log(
-      `[claude-multi] ${store} HTTP ${res.status}: ${errText.slice(0, 300)}`,
-      "error",
-      { store, product_name: productName, status: res.status },
-    );
-    return [];
-  }
-
-  const data = await res.json();
-  const textBlock = [...(data?.content ?? [])].reverse().find((b: { type?: string }) =>
-    b.type === "text"
-  );
-  const text = (textBlock as { text?: string } | undefined)?.text ?? "[]";
-  return parseEnrichmentListPayload(String(text), productName, store);
-};
-
-export const searchProductsWithGemini = async (
-  productName: string,
-  store: string,
-  log: LogFn,
-  options?: { timeoutMs?: number },
-): Promise<GeminiProduct[]> => {
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) {
-    log(`[gemini-multi] ${store} NO API KEY`, "debug", { store, product_name: productName });
-    return [];
-  }
-
-  const model = Deno.env.get("GEMINI_MODEL")?.trim() || GEMINI_DEFAULT_MODEL;
-  const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const timeoutMs = options?.timeoutMs ?? 30_000;
-
-  log(`[gemini-multi] ${store} calling API for "${productName}" (model=${model})`, "info", {
-    store,
-    product_name: productName,
-    model,
-  });
-
-  let res: Response;
-  try {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: multiSearchPrompt(productName, store) }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 4096,
-          responseMimeType: "application/json",
-        },
-      }),
-    });
-  } catch (err) {
-    log(
-      `[gemini-multi] ${store} fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-      "error",
-      { store, product_name: productName },
-    );
-    return [];
-  }
-
-  if (!res.ok) {
-    const errText = await res.text();
-    log(
-      `[gemini-multi] ${store} HTTP ${res.status}: ${errText.slice(0, 300)}`,
-      "error",
-      { store, product_name: productName, status: res.status },
-    );
-    return [];
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.find(
-    (p: { text?: string }) => typeof p?.text === "string",
-  )?.text ?? "[]";
-  return parseEnrichmentListPayload(String(text), productName, store);
-};
-
-export type CollectCandidatesOptions = CollectCandidateOptions & PersistCandidateOptions & {
-  /** Max products to return after merge + persist. */
-  limit?: number;
-};
-
-/** Find several catalog + AI product matches for an ingredient at a store. */
 export const collectCandidates = async (
   supabase: AnySupabaseClient,
   productName: string,
@@ -773,13 +556,7 @@ export const collectCandidates = async (
   options?: CollectCandidatesOptions,
 ): Promise<Candidate[]> => {
   const limit = options?.limit ?? 6;
-  const cached = await lookupExistingProducts(
-    supabase,
-    productName,
-    store,
-    limit,
-    { userId: options?.userId },
-  );
+  const cached = await lookupExistingProducts(supabase, productName, store, limit, { userId: options?.userId });
   const byKey = new Map<string, Candidate>();
 
   for (const row of cached) {
@@ -787,63 +564,42 @@ export const collectCandidates = async (
     byKey.set(candidateKey(c), c);
   }
 
-  log(
-    `[collect-multi] ${store}: ${cached.length} cache hit(s) for "${productName}"`,
-    "info",
-    { store, product_name: productName, cache_count: cached.length },
-  );
+  log(`[collect-multi] ${store}: ${cached.length} ranked catalog hit(s) for "${productName}"`, "info", {
+    store,
+    product_name: productName,
+    cache_count: cached.length,
+  });
 
-  let aiProducts: GeminiProduct[] = [];
-  const tryGemini = async () => {
-    if (options?.skipGemini) return;
-    aiProducts = await searchProductsWithGemini(productName, store, log, {
-      timeoutMs: 25_000,
-    });
-  };
-  const tryClaude = async () => {
-    if (options?.skipClaude) return;
-    aiProducts = await searchProductsWithClaude(productName, store, log);
-  };
-
-  if (options?.preferGemini || options?.skipClaude) {
-    await tryGemini();
-    if (aiProducts.length === 0) await tryClaude();
-  } else {
-    await tryClaude();
-    if (aiProducts.length === 0) await tryGemini();
+  // Only go to the store site when the catalog cannot fill the requested result set.
+  if (byKey.size < limit && !options?.skipClaude) {
+    const storeProducts = await searchProductsWithClaude(productName, store, log);
+    for (const p of storeProducts) {
+      const c: Candidate = {
+        id: "",
+        name: p.name,
+        brand: p.brand,
+        size_label: p.unit,
+        store: p.store,
+        product_url: p.url,
+        image_url: p.image_url,
+        price: p.price,
+        category: p.category,
+        isNew: true,
+      };
+      const key = candidateKey(c);
+      if (!byKey.has(key)) byKey.set(key, c);
+      if (byKey.size >= limit) break;
+    }
   }
 
-  for (const p of aiProducts) {
-    if (!p.enriched) continue;
-    const c: Candidate = {
-      id: "",
-      name: p.name,
-      brand: p.brand,
-      size_label: p.unit,
-      store: p.store,
-      product_url: p.url,
-      image_url: p.image_url,
-      price: p.price,
-      category: p.category,
-      isNew: true,
-    };
-    const key = candidateKey(c);
-    if (!byKey.has(key)) byKey.set(key, c);
-  }
+  const merged = [...byKey.values()]
+    .sort((a, b) => scoreProductMatch(productName, b.name, b.category) - scoreProductMatch(productName, a.name, a.category))
+    .slice(0, limit);
 
-  const merged = [...byKey.values()].slice(0, limit);
   const persisted: Candidate[] = [];
   for (const c of merged) {
-    const saved = await persistCandidate(supabase, c, log, {
-      userId: options?.userId,
-    });
+    const saved = await persistCandidate(supabase, c, log, { userId: options?.userId });
     if (saved?.id) persisted.push(saved);
   }
-
-  log(
-    `[collect-multi] ${store}: returning ${persisted.length} product(s) for "${productName}"`,
-    "info",
-    { store, product_name: productName, count: persisted.length },
-  );
   return persisted;
 };

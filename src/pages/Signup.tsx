@@ -3,6 +3,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import './auth.css'
 
+function buildSignupRedirectTo() {
+  return `${window.location.origin}/auth/callback?next=${encodeURIComponent('/app/fiat')}`
+}
+
 export default function Signup() {
   const navigate = useNavigate()
   const [name, setName] = useState('')
@@ -10,19 +14,21 @@ export default function Signup() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    setMessage(null)
 
-    const { error } = await supabase.auth.signUp({
-      email,
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/login`,
+        emailRedirectTo: buildSignupRedirectTo(),
         data: {
-          display_name: name,
+          display_name: name.trim(),
         },
       },
     })
@@ -30,9 +36,16 @@ export default function Signup() {
     if (error) {
       setError(error.message)
       setLoading(false)
-    } else {
-      navigate('/app/fiat')
+      return
     }
+
+    if (data.session) {
+      navigate('/app/fiat', { replace: true })
+      return
+    }
+
+    setMessage('Check your email to confirm your account. The link will finish signing you in.')
+    setLoading(false)
   }
 
   return (
@@ -43,55 +56,70 @@ export default function Signup() {
         <h2>Create Account</h2>
 
         {error && <div className="auth-error">{error}</div>}
+        {message && <div className="auth-success">{message}</div>}
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="name">Display Name</label>
-            <input
-              id="name"
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              required
-              autoComplete="name"
-            />
-          </div>
+        {!message && (
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label htmlFor="name">Display Name</label>
+              <input
+                id="name"
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                required
+                autoComplete="name"
+              />
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-            />
-          </div>
+            <div className="form-group">
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="password">Password <span className="field-hint">(min. 6 characters)</span></label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-              minLength={6}
-              autoComplete="new-password"
-            />
-          </div>
+            <div className="form-group">
+              <label htmlFor="password">Password <span className="field-hint">(min. 6 characters)</span></label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete="new-password"
+              />
+            </div>
 
-          <button type="submit" disabled={loading} className="auth-btn">
-            {loading ? 'Creating account…' : 'Sign Up'}
+            <button type="submit" disabled={loading} className="auth-btn">
+              {loading ? 'Creating account…' : 'Sign Up'}
+            </button>
+          </form>
+        )}
+
+        {message && (
+          <button
+            type="button"
+            className="auth-btn auth-btn-secondary"
+            onClick={() => setMessage(null)}
+          >
+            Use another email
           </button>
-        </form>
+        )}
 
         <p className="auth-link">
           Already have an account? <Link to="/login">Log in</Link>
+        </p>
+        <p className="auth-link">
+          Prefer email-only? <Link to="/magic-link">Send a magic link</Link>
         </p>
       </div>
     </div>
   )
 }
-

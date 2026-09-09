@@ -20,6 +20,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+function isAuthCallbackRoute() {
+  return window.location.pathname === '/auth/callback'
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
@@ -72,7 +76,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return
 
       if (userError || !user) {
-        await supabase.auth.signOut()
+        // Do not call signOut on the auth callback route. Supabase PKCE magic links need the
+        // one-time code verifier in storage until AuthCallback exchanges the code for a session.
+        if (!isAuthCallbackRoute()) {
+          await supabase.auth.signOut()
+        }
         setSession(null)
         setProfile(null)
       } else {
