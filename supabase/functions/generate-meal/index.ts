@@ -147,6 +147,14 @@ Prefer Australian grocery ingredient names that match ${store} product search te
 Do not include household / cleaning items. Only food ingredients.
 Keep the ingredient list short (6–10 items max).
 Use units from this set only: g, ml, units, tsp, tbsp, cup.
+
+For instructions, write 6–10 detailed steps. Each step should include:
+- The specific action (what to do)
+- How to know it's done (visual cues, texture, colour, smell)
+- Temperatures where relevant (e.g. "medium-high heat", "165°C")
+- Timing with a range not just a single number (e.g. "8–10 minutes")
+- Any tips to avoid common mistakes
+
 Return JSON only matching this schema:
 {
   "name": "string",
@@ -156,7 +164,7 @@ Return JSON only matching this schema:
   "ingredients": [
     { "name": "chicken thigh", "quantityNum": 500, "unit": "g", "notes": "optional" }
   ],
-  "instructions": ["Step 1...", "Step 2..."]
+  "instructions": ["Step 1 with full detail...", "Step 2 with full detail..."]
 }`;
 
 const mealModels = (): string[] => {
@@ -221,7 +229,7 @@ const callGeminiMeal = async (
         }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 4096,
+          maxOutputTokens: 8192,
           responseMimeType: "application/json",
         },
       }),
@@ -273,7 +281,7 @@ const callClaudeMeal = async (
     signal: AbortSignal.timeout(MEAL_FETCH_TIMEOUT_MS),
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [{
         role: "user",
         content:
