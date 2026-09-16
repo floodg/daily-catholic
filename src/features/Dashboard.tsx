@@ -290,7 +290,7 @@ export default function Dashboard() {
             <div className="app-card" style={{ padding: '0.875rem 1rem', marginTop: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
                 <div style={{ fontWeight: 600, color: 'var(--parchment)' }}>Synced walks</div>
-                <span className="status-pill completed">Supabase</span>
+                <Link to="/app/walking" className="btn-app-ghost">View all</Link>
               </div>
 
               {walkLoading ? (

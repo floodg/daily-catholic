@@ -34,7 +34,7 @@ export default function WalkDetailPage() {
     return (
       <div>
         <p style={{ color: "var(--text-subtle)" }}>{error ?? "Walk not found."}</p>
-        <Link to="/app/dashboard" className="btn-app-ghost">Back to dashboard</Link>
+        <Link to="/app/walking" className="btn-app-ghost">Back to walk sessions</Link>
       </div>
     );
   }
@@ -46,7 +46,7 @@ export default function WalkDetailPage() {
           <div className="page-eyebrow">Walking</div>
           <h1 className="page-title">Walk <em>Detail</em></h1>
         </div>
-        <Link to="/app/dashboard" className="btn-app-ghost">Back to dashboard</Link>
+        <Link to="/app/walking" className="btn-app-ghost">Back to walk sessions</Link>
       </div>
 
       <div style={{ color: "var(--text-muted)", marginBottom: "1.5rem", fontSize: "0.9rem" }}>

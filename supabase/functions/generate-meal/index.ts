@@ -169,12 +169,12 @@ Return JSON only matching this schema:
 
 const mealModels = (): string[] => {
   const primary = Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-3.6-flash";
-  const models = [primary, "gemini-3.5-flash"];
-  if (primary !== GEMINI_FALLBACK_MODEL) models.push(GEMINI_FALLBACK_MODEL);
-  if (primary !== GEMINI_DEFAULT_MODEL && GEMINI_DEFAULT_MODEL !== GEMINI_FALLBACK_MODEL) {
-    models.push(GEMINI_DEFAULT_MODEL);
-  }
-  return [...new Set(models)];
+  return [...new Set([
+    primary,
+    "gemini-3.5-flash",
+    GEMINI_FALLBACK_MODEL,
+    GEMINI_DEFAULT_MODEL,
+  ])];
 };
 
 const finalizeMealJson = (text: string, store: string): DraftMeal => {
