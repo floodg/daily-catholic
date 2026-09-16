@@ -147,24 +147,39 @@ function mapWalkLap(row: DbWalkLap): WalkLapDetail {
   };
 }
 
+const WALK_SESSION_SUMMARY_SELECT = `
+  id,
+  started_at,
+  ended_at,
+  elapsed_ms,
+  active_ms,
+  paused_ms,
+  total_steps,
+  total_laps,
+  lap_distance_meters,
+  total_distance_meters,
+  avg_pace_sec_per_km,
+  avg_speed_kmh,
+  oval_name
+`;
+
+export async function getWalkSessions(): Promise<WalkSessionSummary[]> {
+  const { data, error } = await supabase
+    .from("walk_sessions")
+    .select(WALK_SESSION_SUMMARY_SELECT)
+    .order("started_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data as DbWalkSession[]).map(mapWalkSession);
+}
+
 export async function getWalkDashboardSummary(limit = 5): Promise<WalkDashboardSummary> {
   const { data, error } = await supabase
     .from("walk_sessions")
-    .select(`
-      id,
-      started_at,
-      ended_at,
-      elapsed_ms,
-      active_ms,
-      paused_ms,
-      total_steps,
-      total_laps,
-      lap_distance_meters,
-      total_distance_meters,
-      avg_pace_sec_per_km,
-      avg_speed_kmh,
-      oval_name
-    `)
+    .select(WALK_SESSION_SUMMARY_SELECT)
     .order("started_at", { ascending: false })
     .limit(limit);
 

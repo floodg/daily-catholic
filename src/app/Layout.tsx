@@ -33,6 +33,7 @@ const NAV: NavSection[] = [
       { to: '/app/pantry',         icon: '🥫', label: 'Pantry'        },
       { to: '/app/inventory',      icon: '📦', label: 'Inventory'     },
       { to: '/app/workouts',       icon: '⚔️', label: 'Workouts'      },
+      { to: '/app/walking',        icon: '🚶', label: 'Walks'         },
       { to: '/app/macros',         icon: '📊', label: 'My Macros'     },
     ],
   },
@@ -53,7 +54,7 @@ const ADMIN_LINKS: NavLink[] = [
 const PAGE_TITLES: Record<string, string> = {
   '/app/fiat':                'Fiat Mode',
   '/app/dashboard':           'Dashboard',
-  '/app/walking':             'Walk Detail',
+  '/app/walking':             'Walk Sessions',
   '/app/plan':                'Weekly Plan',
   '/app/meals/create-ai':     'Create with AI',
   '/app/meals':               'Meals',
@@ -78,7 +79,9 @@ export default function Layout() {
   const navigate = useNavigate()
   const { signOut, profile } = useAuth()
 
-  const pageTitle = Object.entries(PAGE_TITLES).find(([path]) => location.pathname.startsWith(path))?.[1] ?? 'Daily Catholic'
+  const pageTitle = /^\/app\/walking\/.+/.test(location.pathname)
+    ? 'Walk Detail'
+    : Object.entries(PAGE_TITLES).find(([path]) => location.pathname.startsWith(path))?.[1] ?? 'Daily Catholic'
 
   const handleSignOut = async () => {
     setSidebarOpen(false)
@@ -123,11 +126,11 @@ export default function Layout() {
           {NAV.map(section => (
             <div key={section.section}>
               <div className="sidebar-section-label">{section.section}</div>
-              {section.links.map(link => (
+                  {section.links.map(link => (
                 <Link
                   key={link.to}
                   to={link.to}
-                  className={`sidebar-link${location.pathname === link.to ? ' active' : ''}`}
+                  className={`sidebar-link${location.pathname === link.to || (link.to === '/app/walking' && location.pathname.startsWith('/app/walking/')) ? ' active' : ''}`}
                   onClick={() => setSidebarOpen(false)}
                 >
                   <span className="sidebar-link-icon">{link.icon}</span>
