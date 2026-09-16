@@ -281,7 +281,7 @@ export default function Dashboard() {
                       textAlign: 'left',
                     }}
                   >
-                    🚶 40 min walk (7–10k steps)
+                    🚶 Daily Walk
                   </button>
                 </div>
                 <Link to="/app/workouts" className="btn-app-ghost">Plan workouts</Link>
