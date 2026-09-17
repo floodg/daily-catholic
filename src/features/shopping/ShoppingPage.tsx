@@ -19,6 +19,7 @@ import {
 import { unmarkPurchasedShoppingItem } from "./api";
 import { deleteShoppingTripItem, getShoppingTrips, updateShoppingTripItem } from "../shopping-trips/api";
 import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../context/AuthProvider";
 import {
   resolvePreferredProductsForIngredientNames,
   resolvePreferredProductsForIngredientIds,
@@ -124,6 +125,7 @@ type SectionKey = 'trip' | 'tasks' | 'manual' | 'done';
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function ShoppingPage() {
+  const { user } = useAuth();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [aggregatedItems, setAggregatedItems] = useState<ShoppingItem[]>([]);
@@ -140,6 +142,34 @@ export default function ShoppingPage() {
   const [hideChecked, setHideChecked] = useState(false);
   const [pendingItems, setPendingItems] = useState<PendingShoppingListItem[]>([]);
   const [collapsedStores, setCollapsedStores] = useState<Set<string>>(new Set());
+  // Local, per-user "in cart" state for trip items (first tap = in cart, second tap = purchased)
+  const [inCartIds, setInCartIds] = useState<Set<string>>(new Set());
+
+  // Load/save in-cart state in localStorage scoped by user id
+  useEffect(() => {
+    const key = `shopping_in_cart:${user?.id ?? 'anon'}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const arr: string[] = JSON.parse(raw);
+        setInCartIds(new Set(arr));
+      } else {
+        setInCartIds(new Set());
+      }
+    } catch {
+      setInCartIds(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    const key = `shopping_in_cart:${user?.id ?? 'anon'}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(Array.from(inCartIds)));
+    } catch {
+      // ignore
+    }
+  }, [inCartIds, user?.id]);
 
   useEffect(() => {
     const today = new Date();
@@ -441,11 +471,34 @@ export default function ShoppingPage() {
         netQtyNeeded: item.netQtyNeeded,
         shoppingTripItemId: item.id,
       });
+      setInCartIds(prev => {
+        if (!prev.has(item.id)) return prev;
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
       await generateShoppingList();
       await refreshPurchased();
     } catch (err) {
       console.error(err);
       alert('Failed to mark as purchased.');
+    }
+  };
+
+  // First tap puts the item "in cart" (local UI state). Second tap commits purchase.
+  const handleToggleCartOrPurchase = async (item: any) => {
+    setInCartIds(prev => {
+      const next = new Set(prev);
+      if (next.has(item.id)) {
+        next.delete(item.id);
+      } else {
+        next.add(item.id);
+      }
+      return next;
+    });
+    // If already in cart before this tap, commit purchase
+    if (inCartIds.has(item.id)) {
+      await handleMarkPurchased(item);
     }
   };
 
@@ -868,16 +921,17 @@ export default function ShoppingPage() {
                       }}
                     >
                       <button
-                        onClick={() => handleMarkPurchased(item as any)}
+                        onClick={() => void handleToggleCartOrPurchase(item as any)}
                         style={{
                           background: 'none', border: 'none', cursor: 'pointer',
                           padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center',
-                          color: 'var(--app-border-strong)', transition: 'color 0.15s',
+                          color: inCartIds.has(item.id) ? 'var(--gold)' : 'var(--app-border-strong)',
+                          transition: 'color 0.15s',
                           marginTop: 2,
                         }}
-                        aria-label="Mark as purchased"
+                        aria-label={inCartIds.has(item.id) ? 'Purchase item' : 'Add to cart'}
                       >
-                        <Circle size={26} />
+                        {inCartIds.has(item.id) ? <CheckCircle2 size={26} /> : <Circle size={26} />}
                       </button>
                       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                         <ShoppingTripItemLabels
