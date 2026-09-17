@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, Circle, Plus, ShoppingCart, Tr
 import type { ShoppingItem, ShoppingTrip, ShoppingTripItem } from '../../domain/types';
 import { v4 as uuidv4 } from '../../storage/uuid';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthProvider';
 import { formatQuantity, isUnmeasuredQuantity, toBaseUnit } from './quantityUtils';
 import {
   checkOffPendingShoppingListItem,
@@ -104,6 +105,7 @@ function ProductLabel({ name, quantity, style }: { name: string; quantity?: stri
 }
 
 export default function ShoppingPageFast() {
+  const { user } = useAuth();
   const [tripItems, setTripItems] = useState<TripListItem[]>([]);
   const [purchasedItems, setPurchasedItems] = useState<PurchasedShoppingItem[]>([]);
   const [pendingItems, setPendingItems] = useState<PendingShoppingListItem[]>([]);
@@ -120,6 +122,33 @@ export default function ShoppingPageFast() {
   const [swapOptions, setSwapOptions] = useState<IngredientProductPreference[]>([]);
   const [swapLoading, setSwapLoading] = useState(false);
   const [swapSaving, setSwapSaving] = useState(false);
+  const [inCartIds, setInCartIds] = useState<Set<string>>(new Set());
+
+  // Load/save in-cart state in localStorage scoped by user id
+  useEffect(() => {
+    const key = `shopping_in_cart:${user?.id ?? 'anon'}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const arr: string[] = JSON.parse(raw);
+        setInCartIds(new Set(arr));
+      } else {
+        setInCartIds(new Set());
+      }
+    } catch {
+      setInCartIds(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    const key = `shopping_in_cart:${user?.id ?? 'anon'}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(Array.from(inCartIds)));
+    } catch {
+      // ignore
+    }
+  }, [inCartIds, user?.id]);
 
   const load = useCallback(async (initial = false) => {
     initial ? setLoading(true) : setRefreshing(true);
@@ -223,9 +252,28 @@ export default function ShoppingPageFast() {
         shoppingTripItemId: item.id,
       });
       setPurchasedItems((prev) => [purchased, ...prev]);
+      setInCartIds((prev) => {
+        if (!prev.has(item.id)) return prev;
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
     } catch (err) {
       console.error(err);
       alert('Failed to mark as purchased.');
+    }
+  }
+
+  // First tap puts the item "in cart" (local UI state). Second tap commits purchase.
+  async function toggleCartOrPurchase(item: TripListItem) {
+    setInCartIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+    if (inCartIds.has(item.id)) {
+      await markPurchased(item);
     }
   }
 
@@ -404,7 +452,13 @@ export default function ShoppingPageFast() {
                   )}
                   {!collapsedStores.has(store) && items.map((item, index) => (
                     <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '0.875rem 1rem', borderTop: index || itemsByStore.size === 1 ? '1px solid var(--app-border)' : 'none' }}>
-                      <button onClick={() => void markPurchased(item)} style={iconButtonStyle} aria-label="Mark as purchased"><Circle size={26} /></button>
+                      <button
+                        onClick={() => void toggleCartOrPurchase(item)}
+                        style={{ ...iconButtonStyle, color: inCartIds.has(item.id) ? 'var(--gold)' : 'var(--text-subtle)' }}
+                        aria-label={inCartIds.has(item.id) ? 'Purchase item' : 'Add to cart'}
+                      >
+                        {inCartIds.has(item.id) ? <CheckCircle2 size={26} /> : <Circle size={26} />}
+                      </button>
                       <div style={{ flex: 1, minWidth: 0 }}><ProductLabel name={item.name} quantity={item.quantity} /></div>
                       <button onClick={() => void openSwap(item)} className="btn-app-ghost" style={{ padding: '0.2rem 0.45rem' }} title="Swap product">🔄</button>
                       <button onClick={() => void removeTripItem(item)} style={iconButtonStyle} aria-label="Remove item"><Trash2 size={16} /></button>
