@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getWalkSessions, type WalkSessionSummary } from "./api";
+import WalkStatsNav from "./WalkStatsNav";
 
 export default function WalkSessionsPage() {
   const navigate = useNavigate();
@@ -30,6 +31,8 @@ export default function WalkSessionsPage() {
           <h1 className="page-title">Walk <em>Sessions</em></h1>
         </div>
       </div>
+
+      <WalkStatsNav />
 
       {loading ? (
         <p style={{ color: "var(--text-subtle)" }}>Loading walk sessions…</p>

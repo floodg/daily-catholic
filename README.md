@@ -19,6 +19,7 @@ All meal planning, inventory, shopping, macro, and profile data are stored in **
 - **Trip History** — Shopping trips and purchases.
 - **Workouts** — Templates and sessions (with local persistence where noted in code).
 - **My Macros** — Daily calorie and macro tracking integrated with Meals and the Weekly Planner.
+- **Walking** — Synced walk sessions with linked weekly, monthly, and records dashboards. Switch bar charts between distance, steps, active time, walks, and laps; select a period to inspect its sessions. Includes best weeks/months, personal walk records, averages, pace, streaks, and weekday patterns. Calendar averages include quiet periods; dates use local time and weeks run Monday–Sunday.
 
 #### My Macros
 

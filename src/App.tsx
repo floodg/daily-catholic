@@ -29,6 +29,7 @@ const FiatModePage = lazy(() => import('./features/fiat/FiatModePage'))
 const MacrosPage = lazy(() => import('./features/macros/MacrosPage'))
 const WalkSessionsPage = lazy(() => import('./features/walking/WalkSessionsPage'))
 const WalkDetailPage = lazy(() => import('./features/walking/WalkDetailPage'))
+const WalkStatsPage = lazy(() => import('./features/walking/WalkStatsPage'))
 
 function AuthBootstrapLoading() {
   return (
@@ -105,6 +106,9 @@ function AppRoutes() {
             </Route>
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="walking" element={<WalkSessionsPage />} />
+            <Route path="walking/stats/weekly" element={<WalkStatsPage view="weekly" />} />
+            <Route path="walking/stats/monthly" element={<WalkStatsPage view="monthly" />} />
+            <Route path="walking/stats/records" element={<WalkStatsPage view="records" />} />
             <Route path="walking/:sessionId" element={<WalkDetailPage />} />
             <Route path="meals/create-ai" element={<CreateAiMealPage />} />
             <Route path="meals" element={<MealsPage />} />

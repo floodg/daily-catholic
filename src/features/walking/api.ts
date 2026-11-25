@@ -164,16 +164,24 @@ const WALK_SESSION_SUMMARY_SELECT = `
 `;
 
 export async function getWalkSessions(): Promise<WalkSessionSummary[]> {
-  const { data, error } = await supabase
-    .from("walk_sessions")
-    .select(WALK_SESSION_SUMMARY_SELECT)
-    .order("started_at", { ascending: false });
+  const sessions: WalkSessionSummary[] = [];
+  const pageSize = 1000;
+  // Fetch every page so lifetime records aren't limited to the API row cap.
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase
+      .from("walk_sessions")
+      .select(WALK_SESSION_SUMMARY_SELECT)
+      .order("started_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(offset, offset + pageSize - 1);
 
-  if (error) {
-    throw error;
+    if (error) throw error;
+    if (!data?.length) break;
+    sessions.push(...(data as DbWalkSession[]).map(mapWalkSession));
+    // Continue to an empty page, including when the server has a lower row cap.
+    offset += data.length;
   }
-
-  return (data as DbWalkSession[]).map(mapWalkSession);
+  return sessions;
 }
 
 export async function getWalkDashboardSummary(limit = 5): Promise<WalkDashboardSummary> {
